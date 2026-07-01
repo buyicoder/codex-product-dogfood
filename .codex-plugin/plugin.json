@@ -1,0 +1,33 @@
+{
+  "name": "codex-product-dogfood",
+  "version": "0.1.0",
+  "description": "Real-user front-end product dogfooding for Codex.",
+  "author": {
+    "name": "Local developer"
+  },
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "dogfood",
+    "playwright",
+    "frontend-audit"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Product Dogfood",
+    "shortDescription": "Audit web products like a real user.",
+    "longDescription": "Runs profile-based Playwright journeys across desktop and mobile viewports, captures evidence, and turns product issues into a development plan.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Dogfood this web product from a real user perspective.",
+      "Audit this URL with the student-learning profile.",
+      "Turn product UX findings into a development plan."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

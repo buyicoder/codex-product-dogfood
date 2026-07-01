@@ -1,0 +1,29 @@
+{
+  "name": "codex-product-dogfood",
+  "version": "0.1.0",
+  "description": "Codex plugin and CLI for real-user front-end product dogfooding.",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "codex-product-dogfood": "./packages/cli/dist/index.js"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @codex-product-dogfood/schemas && npm run build --workspace @codex-product-dogfood/profiles && npm run build --workspace @codex-product-dogfood/reporter && npm run build --workspace @codex-product-dogfood/runner && npm run build --workspace @codex-product-dogfood/cli",
+    "lint": "npm run typecheck",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "audit": "node ./packages/cli/dist/index.js audit"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "playwright": "^1.53.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

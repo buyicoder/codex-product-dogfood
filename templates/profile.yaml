@@ -1,0 +1,17 @@
+name: custom-profile
+description: Describe the target user and product category.
+testQuestion: Enter a realistic user prompt.
+primaryEntryKeywords:
+  - start
+  - ask
+expectedSignals:
+  - chatInput
+failureSignals:
+  - error
+journeys:
+  - id: first-run
+    title: First run
+    userGoal: User can start the core journey.
+    steps:
+      - action: open
+        label: Open the target URL
