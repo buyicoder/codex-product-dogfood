@@ -11,6 +11,7 @@ Use this skill when the user asks Codex to dogfood, audit, QA, review, or maturi
 
 - Target URL.
 - Profile: choose `student-learning` for education, homework, tutoring, classroom, practice, or study products. Choose `ai-chat` for general chat, assistant, agent, or prompt-entry products.
+- Optional YAML profile file via `--profile-file`.
 - Optional output directory. Default is `runtime/audits/latest`.
 
 ## Run
@@ -25,6 +26,7 @@ Example:
 
 ```bash
 npx codex-product-dogfood audit https://staging.study.zhanzhanai.com --profile student-learning
+npx codex-product-dogfood audit https://example.com --profile-file templates/profile.yaml --viewport desktop
 ```
 
 The runner automatically audits:
@@ -36,13 +38,14 @@ The runner automatically audits:
 ## What The Runner Does
 
 - Opens the URL with Playwright Chromium.
+- Executes profile journeys and steps.
 - Captures screenshots before and after primary actions.
 - Clicks likely primary entry points based on the selected profile.
 - Fills the best visible input with a realistic test question.
 - Presses Enter to submit.
 - Attempts a small upload when a file input exists.
 - Captures DOM signals, console errors, and network failures.
-- Writes `report.md`, `findings.json`, `signals.json`, viewport DOM snapshots, and `screenshots/`.
+- Writes `report.md`, `findings.json`, `signals.json`, `run.json`, viewport DOM summaries, and `screenshots/`.
 
 ## Review Artifacts
 
@@ -51,7 +54,8 @@ Open `runtime/audits/latest/report.md` first, then inspect:
 - `runtime/audits/latest/findings.json`
 - `runtime/audits/latest/screenshots/`
 - `runtime/audits/latest/signals.json`
-- `runtime/audits/latest/*-dom.json`
+- `runtime/audits/latest/run.json`
+- `runtime/audits/latest/dom/`
 
 Treat MVP findings as triage. Confirm screenshot evidence before making strong product claims.
 
@@ -85,5 +89,12 @@ Summarize:
 - Maturity score and release readiness.
 - Top P0/P1 findings.
 - Recommended development plan.
+
+Useful CLI helpers:
+
+```bash
+npx codex-product-dogfood profiles
+npx codex-product-dogfood init-profile --out ./profile.yaml
+```
 
 If a GitHub remote is needed, ask after the local MVP is complete.

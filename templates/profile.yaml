@@ -1,6 +1,8 @@
 name: custom-profile
 description: Describe the target user and product category.
 testQuestion: Enter a realistic user prompt.
+viewports:
+  - desktop
 primaryEntryKeywords:
   - start
   - ask
@@ -14,4 +16,21 @@ journeys:
     userGoal: User can start the core journey.
     steps:
       - action: open
-        label: Open the target URL
+      - action: click
+        label: Click a likely primary entry
+        target:
+          kind: keyword
+          values:
+            - start
+            - ask
+        optional: true
+      - action: fill
+        label: Fill the primary input
+        target:
+          kind: bestInput
+        value: "{{testQuestion}}"
+      - action: press
+        label: Submit with Enter
+        key: Enter
+      - action: observe
+        label: Observe the result

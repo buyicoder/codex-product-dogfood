@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@codex-product-dogfood/runner": "file:../runner"
+    "@codex-product-dogfood/runner": "file:../runner",
+    "commander": "^15.0.0"
   }
 }

@@ -28,4 +28,7 @@ runtime/audits/latest/screenshots/
 ```bash
 codex-product-dogfood audit <url> --profile ai-chat
 codex-product-dogfood audit <url> --profile student-learning --out runtime/audits/my-run
+codex-product-dogfood audit <url> --profile-file templates/profile.yaml --viewport desktop
+codex-product-dogfood profiles
+codex-product-dogfood init-profile --out ./my-profile.yaml
 ```

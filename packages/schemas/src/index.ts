@@ -1,5 +1,7 @@
 export type Severity = "P0" | "P1" | "P2";
 
+export type Confidence = "high" | "medium" | "low";
+
 export type ViewportName = "desktop" | "mobile" | "small-mobile";
 
 export type ProfileName = "ai-chat" | "student-learning";
@@ -11,10 +13,14 @@ export interface Evidence {
 }
 
 export interface Finding {
+  id?: string;
   severity: Severity;
+  confidence?: Confidence;
   title: string;
   journey: string;
   viewport: ViewportName;
+  affectedViewports?: ViewportName[];
+  tags?: string[];
   userSymptom: string;
   expected: string;
   actual: string;
@@ -31,7 +37,7 @@ export interface MaturityScore {
 
 export interface AuditSummary {
   url: string;
-  profile: ProfileName;
+  profile: string;
   generatedAt: string;
   viewports: ViewportName[];
   maturity: MaturityScore;
@@ -53,6 +59,7 @@ export interface DevelopmentPlanItem {
 
 export interface RuntimeSignal {
   viewport: ViewportName;
+  journey?: string;
   consoleErrors: string[];
   networkFailures: string[];
   domSignals: Record<string, boolean | number | string | string[]>;

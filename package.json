@@ -11,17 +11,24 @@
     "build": "npm run build --workspace @codex-product-dogfood/schemas && npm run build --workspace @codex-product-dogfood/profiles && npm run build --workspace @codex-product-dogfood/reporter && npm run build --workspace @codex-product-dogfood/runner && npm run build --workspace @codex-product-dogfood/cli",
     "lint": "npm run typecheck",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "audit": "node ./packages/cli/dist/index.js audit"
+    "test": "npm run test:unit",
+    "test:unit": "vitest run",
+    "test:smoke": "node ./packages/cli/dist/index.js audit https://example.com --profile ai-chat --viewport desktop --out runtime/audits/smoke",
+    "audit": "node ./packages/cli/dist/index.js audit",
+    "audit:example": "node ./packages/cli/dist/index.js audit https://example.com --profile ai-chat --viewport desktop --out runtime/audits/example"
   },
   "workspaces": [
     "packages/*"
   ],
   "devDependencies": {
     "@types/node": "^24.0.10",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.9"
   },
   "dependencies": {
-    "playwright": "^1.53.2"
+    "commander": "^15.0.0",
+    "playwright": "^1.53.2",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=20"
