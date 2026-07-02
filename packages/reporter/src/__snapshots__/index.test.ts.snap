@@ -50,6 +50,7 @@ exports[`reporter > renders a markdown report with summary and findings 1`] = `
 - Review every screenshot linked from P0/P1 findings.
 - Mark heuristic-only missing-signal findings as confirmed or false positive.
 - Check mobile and small-mobile screenshots for blocked primary actions.
+- Check bbox/overflow findings for composer, upload, voice, send, and status elements shifted outside the viewport.
 - Convert confirmed P0/P1 findings into implementation tasks before release.
 
 ## Evidence Inventory

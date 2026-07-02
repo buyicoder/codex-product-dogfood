@@ -45,6 +45,8 @@ The runner automatically audits:
 - Presses Enter to submit.
 - Attempts a small upload when a file input exists.
 - Captures DOM signals, console errors, and network failures.
+- Captures bounding boxes for visible buttons, form controls, status regions, and aria-labeled controls.
+- Flags mobile composer/status regressions when visible controls have `x < 0` or `x + width > viewportWidth`.
 - Writes `report.md`, `findings.json`, `signals.json`, `run.json`, viewport DOM summaries, and `screenshots/`.
 
 ## Review Artifacts
@@ -56,6 +58,8 @@ Open `runtime/audits/latest/report.md` first, then inspect:
 - `runtime/audits/latest/signals.json`
 - `runtime/audits/latest/run.json`
 - `runtime/audits/latest/dom/`
+
+Mobile layout note: bbox/overflow findings are intended to catch composer, upload, voice, send, and status-copy regressions where controls are clipped or shifted offscreen at mobile widths such as `390x844` and `375x667`.
 
 Treat MVP findings as triage. Confirm screenshot evidence before making strong product claims.
 

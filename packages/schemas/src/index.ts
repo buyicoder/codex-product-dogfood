@@ -7,7 +7,7 @@ export type ViewportName = "desktop" | "mobile" | "small-mobile";
 export type ProfileName = "ai-chat" | "student-learning";
 
 export interface Evidence {
-  type: "screenshot" | "console" | "network" | "dom" | "trace";
+  type: "screenshot" | "console" | "network" | "dom" | "trace" | "bbox";
   path?: string;
   detail: string;
 }

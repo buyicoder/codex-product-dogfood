@@ -125,6 +125,7 @@ export function renderMarkdownReport(outDir: string, report: AuditReport): strin
   lines.push("- Review every screenshot linked from P0/P1 findings.");
   lines.push("- Mark heuristic-only missing-signal findings as confirmed or false positive.");
   lines.push("- Check mobile and small-mobile screenshots for blocked primary actions.");
+  lines.push("- Check bbox/overflow findings for composer, upload, voice, send, and status elements shifted outside the viewport.");
   lines.push("- Convert confirmed P0/P1 findings into implementation tasks before release.");
   lines.push("");
   lines.push("## Evidence Inventory");

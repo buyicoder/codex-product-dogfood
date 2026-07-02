@@ -42,6 +42,30 @@ interface RunMetadata {
   steps: StepResult[];
 }
 
+export interface BBoxElement {
+  selector: string;
+  role?: string;
+  text?: string;
+  ariaLabel?: string;
+  bbox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+export interface BBoxOverflow {
+  selector: string;
+  role?: string;
+  text?: string;
+  ariaLabel?: string;
+  bbox: BBoxElement["bbox"];
+  viewportWidth: number;
+  overflowLeft: number;
+  overflowRight: number;
+}
+
 const execFileAsync = promisify(execFile);
 
 const viewports: Record<ViewportName, { width: number; height: number; isMobile?: boolean }> = {
@@ -232,9 +256,14 @@ async function executeJourney(
   }
 
   const domSignals = await collectDomSignals(page, profile);
+  const bboxElements = await collectBBoxElements(page);
+  const bboxOverflows = detectBBoxOverflows(bboxElements, viewports[viewportName].width);
   await writeFile(join(domDir, `${viewportName}-${journey.id}.json`), `${JSON.stringify(domSignals, null, 2)}\n`);
+  await writeFile(join(domDir, `${viewportName}-${journey.id}-bbox.json`), `${JSON.stringify({ viewportWidth: viewports[viewportName].width, elements: bboxElements, overflows: bboxOverflows }, null, 2)}\n`);
+  domSignals.bboxOverflowCount = bboxOverflows.length;
   const expectedSignals = Array.from(new Set([...profile.expectedSignals, ...journey.steps.flatMap((step) => step.expectedSignals ?? [])]));
   findings.push(...buildSignalFindings(profile, journey.id, viewportName, expectedSignals, domSignals, screenshots, reproBase));
+  findings.push(...buildBBoxOverflowFindings(journey.id, viewportName, bboxOverflows, screenshots, reproBase));
   findings.push(...buildRuntimeFindings(viewportName, journey.id, consoleErrors, networkFailures, screenshots, reproBase));
 
   return {
@@ -433,6 +462,73 @@ async function collectDomSignals(page: Page, profile: AuditProfile): Promise<Rec
   }, { failureSignals: profile.failureSignals });
 }
 
+async function collectBBoxElements(page: Page): Promise<BBoxElement[]> {
+  return page.evaluate(() => {
+    const candidates = Array.from(document.querySelectorAll("button, input, textarea, select, [role='status'], [aria-label]"));
+    const selectorFor = (element: Element): string => {
+      const tag = element.tagName.toLowerCase();
+      const id = element.getAttribute("id");
+      if (id) {
+        return `${tag}#${id}`;
+      }
+      const testId = element.getAttribute("data-testid");
+      if (testId) {
+        return `${tag}[data-testid="${testId}"]`;
+      }
+      const ariaLabel = element.getAttribute("aria-label");
+      if (ariaLabel) {
+        return `${tag}[aria-label="${ariaLabel.slice(0, 40)}"]`;
+      }
+      const role = element.getAttribute("role");
+      if (role) {
+        return `${tag}[role="${role}"]`;
+      }
+      return tag;
+    };
+
+    return candidates.flatMap((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      const visible = rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      if (!visible) {
+        return [];
+      }
+      return [{
+        selector: selectorFor(element),
+        role: element.getAttribute("role") ?? undefined,
+        text: (element.textContent ?? (element as HTMLInputElement).value ?? "").trim().replace(/\s+/g, " ").slice(0, 80) || undefined,
+        ariaLabel: element.getAttribute("aria-label") ?? undefined,
+        bbox: {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        }
+      }];
+    });
+  });
+}
+
+export function detectBBoxOverflows(elements: BBoxElement[], viewportWidth: number): BBoxOverflow[] {
+  return elements.flatMap((element) => {
+    const overflowLeft = Math.max(0, -element.bbox.x);
+    const overflowRight = Math.max(0, element.bbox.x + element.bbox.width - viewportWidth);
+    if (overflowLeft === 0 && overflowRight === 0) {
+      return [];
+    }
+    return [{
+      selector: element.selector,
+      role: element.role,
+      text: element.text,
+      ariaLabel: element.ariaLabel,
+      bbox: element.bbox,
+      viewportWidth,
+      overflowLeft,
+      overflowRight
+    }];
+  });
+}
+
 function buildSignalFindings(
   profile: AuditProfile,
   journeyId: string,
@@ -475,6 +571,42 @@ function buildSignalFindings(
     });
   }
   return findings;
+}
+
+function buildBBoxOverflowFindings(
+  journeyId: string,
+  viewport: ViewportName,
+  overflows: BBoxOverflow[],
+  screenshots: string[],
+  reproBase: string[]
+): Finding[] {
+  return overflows.map((overflow) => {
+    const label = overflow.ariaLabel ?? overflow.text ?? overflow.role ?? overflow.selector;
+    const overflowText = overflow.overflowLeft > 0
+      ? `x is ${overflow.bbox.x}, ${overflow.overflowLeft}px beyond the left viewport edge`
+      : `x + width is ${overflow.bbox.x + overflow.bbox.width}, ${overflow.overflowRight}px beyond viewport width ${overflow.viewportWidth}`;
+    return {
+      severity: "P1",
+      title: `Interactive element overflows viewport: ${label}`,
+      journey: journeyId,
+      viewport,
+      confidence: "high",
+      tags: ["bbox", "overflow", "layout", viewport],
+      userSymptom: "A mobile user may see composer/status controls clipped, shifted offscreen, or hard to tap.",
+      expected: "Visible interactive and status elements should stay fully inside the viewport.",
+      actual: `${overflowText}. Selector: ${overflow.selector}. BBox: ${JSON.stringify(overflow.bbox)}.`,
+      evidence: [
+        { type: "bbox", detail: `selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}` },
+        { type: "screenshot", path: screenshots.at(-1), detail: "Screenshot captured after the audited journey step" }
+      ],
+      reproSteps: [...reproBase, `Inspect ${overflow.selector} bounding box`],
+      acceptanceCriteria: [
+        "The element has x >= 0 and x + width <= viewport width on mobile and small-mobile.",
+        "Status, upload, voice, and send controls do not push each other outside the viewport.",
+        "Long state copy wraps, truncates, or reserves space without clipping primary controls."
+      ]
+    };
+  });
 }
 
 function buildRuntimeFindings(
@@ -572,6 +704,11 @@ function tagsForFinding(finding: Finding): string[] {
   }
   if (finding.title.includes("Missing expected")) {
     tags.add("missing-signal");
+  }
+  if (finding.title.includes("overflows viewport")) {
+    tags.add("bbox");
+    tags.add("overflow");
+    tags.add("layout");
   }
   if (finding.title.startsWith("Step failed")) {
     tags.add("journey-step");

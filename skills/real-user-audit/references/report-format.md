@@ -9,5 +9,6 @@ The report should include:
 - Findings with evidence and repro steps.
 - Recommended development plan with acceptance criteria.
 - Manual review checklist for false positives and screenshot review.
+- Bbox/overflow findings for mobile composer, upload, voice, send, and status controls that leave the viewport.
 
 The JSON report should preserve the same finding fields for automation.
