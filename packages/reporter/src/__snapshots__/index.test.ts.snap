@@ -31,6 +31,7 @@ exports[`reporter > renders a markdown report with summary and findings 1`] = `
 - Introduced screenshot: timeline/mobile/homework-help/02-upload/004-uploading-500ms.png
 - Introduced bbox: timeline/mobile/homework-help/02-upload/004-uploading-500ms-bbox.json
 - Introduced DOM: timeline/mobile/homework-help/02-upload/004-uploading-500ms-dom.json
+- State chain: timeline/mobile/homework-help/02-upload/state-chain.json
 - Introduced DOM summary: status="Uploading image"; visibleImages=1; images=img[0] 80x60 natural=800x600 alt="homework"; rawLatexMatches=0; scroll/client=440/390
 - Console near event: 0
 - Network near event: 0

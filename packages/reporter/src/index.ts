@@ -89,6 +89,9 @@ export function renderMarkdownReport(outDir: string, report: AuditReport): strin
           if (event.domPath) {
             lines.push(`- Introduced DOM: ${relative(dirname(`${outDir}/report.md`), event.domPath)}`);
           }
+          if (event.stateChainPath) {
+            lines.push(`- State chain: ${relative(dirname(`${outDir}/report.md`), event.stateChainPath)}`);
+          }
           const domSummary = summarizeIntroducedEventDom(event.domSummary);
           if (domSummary) {
             lines.push(`- Introduced DOM summary: ${domSummary}`);

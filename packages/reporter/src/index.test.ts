@@ -22,6 +22,7 @@ function finding(severity: Finding["severity"], title = `${severity} finding`): 
       screenshot: "/tmp/audit/timeline/mobile/homework-help/02-upload/004-uploading-500ms.png",
       bboxPath: "/tmp/audit/timeline/mobile/homework-help/02-upload/004-uploading-500ms-bbox.json",
       domPath: "/tmp/audit/timeline/mobile/homework-help/02-upload/004-uploading-500ms-dom.json",
+      stateChainPath: "/tmp/audit/timeline/mobile/homework-help/02-upload/state-chain.json",
       domSummary: {
         statusTexts: ["Uploading image"],
         visibleImages: 1,

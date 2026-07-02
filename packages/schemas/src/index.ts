@@ -36,6 +36,7 @@ export interface Finding {
     screenshot?: string;
     bboxPath?: string;
     domPath?: string;
+    stateChainPath?: string;
     domSummary?: Record<string, boolean | number | string | string[]>;
     consoleSummary?: {
       count: number;

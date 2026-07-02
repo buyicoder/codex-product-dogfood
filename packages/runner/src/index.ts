@@ -29,6 +29,7 @@ interface StepResult {
   bboxSnapshot?: string;
   timelineManifest?: string;
   timelineContactSheet?: string;
+  stateChain?: string;
   detail?: string;
 }
 
@@ -118,6 +119,48 @@ export interface TimelineStepManifest {
   action: string;
   events: TimelineEvent[];
   contactSheet?: string;
+}
+
+export interface StateChainFrame {
+  viewport: ViewportName;
+  journey: string;
+  stepIndex: number;
+  stepLabel: string;
+  action: string;
+  event: string;
+  phase: "before" | "during" | "ready" | "after" | "persisted";
+  timestamp: string;
+  elapsedMs: number;
+  screenshot: string;
+  bboxPath: string;
+  domPath: string;
+  bboxOverflowCount: number;
+  statusTexts: string[];
+  visibleImages: number;
+  rawLatexMatches: number;
+  scrollWidth?: number;
+  clientWidth?: number;
+  consoleCount: number;
+  networkFailureCount: number;
+}
+
+export interface StateChainManifest {
+  viewport: ViewportName;
+  journey: string;
+  stepIndex: number;
+  stepLabel: string;
+  action: string;
+  contactSheet?: string;
+  firstBadFrame?: StateChainFrame;
+  lastGoodFrame?: StateChainFrame;
+  stateSummary: {
+    frameCount: number;
+    maxVisibleImages: number;
+    statusTexts: string[];
+    maxBBoxOverflowCount: number;
+    maxRawLatexMatches: number;
+  };
+  frames: StateChainFrame[];
 }
 
 const execFileAsync = promisify(execFile);
@@ -317,6 +360,7 @@ async function executeJourney(
     timelineEvents.push(...stepTimelineEvents);
     const timelineContactSheet = await writeTimelineStepContactSheet(timelineDir, viewportName, journey.id, index, step, stepTimelineEvents);
     const timelineManifest = await writeTimelineStepManifest(timelineDir, viewportName, journey.id, index, step, stepTimelineEvents, timelineContactSheet);
+    const stateChain = await writeStateChainManifest(timelineDir, viewportName, journey.id, index, step, stepTimelineEvents, timelineContactSheet);
     if (step.action === "open" && result.status === "passed") {
       opened = true;
     }
@@ -324,7 +368,7 @@ async function executeJourney(
     screenshots.push(screenshot);
     const bboxSnapshot = await captureBBoxSnapshot(page, domDir, viewportName, journey.id, index, step, screenshot);
     bboxSnapshots.push(bboxSnapshot);
-    steps.push({ journey: journey.id, step: step.label, action: step.action, status: result.status, screenshot, bboxSnapshot: bboxSnapshot.artifactPath, timelineManifest, timelineContactSheet, detail: result.detail });
+    steps.push({ journey: journey.id, step: step.label, action: step.action, status: result.status, screenshot, bboxSnapshot: bboxSnapshot.artifactPath, timelineManifest, timelineContactSheet, stateChain, detail: result.detail });
     if (result.status === "failed") {
       findings.push(stepFailureFinding(profile, journey, step, viewportName, result.detail, screenshot, reproBase));
     }
@@ -549,6 +593,98 @@ export async function writeTimelineStepContactSheet(
   const title = `${viewportName} / ${journey} / ${index + 1}. ${step.label}`;
   await writeFile(contactSheetPath, renderContactSheetHtml(title, events, contactSheetPath));
   return contactSheetPath;
+}
+
+export async function writeStateChainManifest(
+  timelineDir: string,
+  viewportName: ViewportName,
+  journey: string,
+  index: number,
+  step: JourneyStep,
+  events: TimelineEvent[],
+  contactSheet?: string
+): Promise<string> {
+  const directory = join(timelineDir, viewportName, journey, `${String(index + 1).padStart(2, "0")}-${slug(step.action)}`);
+  await mkdir(directory, { recursive: true });
+  const stateChainPath = join(directory, "state-chain.json");
+  const manifest = buildStateChainManifest(viewportName, journey, index, step, events, contactSheet);
+  await writeFile(stateChainPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return stateChainPath;
+}
+
+export function buildStateChainManifest(
+  viewportName: ViewportName,
+  journey: string,
+  index: number,
+  step: Pick<JourneyStep, "action" | "label">,
+  events: TimelineEvent[],
+  contactSheet?: string
+): StateChainManifest {
+  const frames = events.map((event) => timelineEventToStateChainFrame(event));
+  const firstBadFrame = frames.find((frame) => frame.bboxOverflowCount > 0);
+  const lastGoodFrame = firstBadFrame
+    ? frames.slice(0, frames.indexOf(firstBadFrame)).reverse().find((frame) => frame.bboxOverflowCount === 0)
+    : frames.at(-1);
+  const statusTexts = Array.from(new Set(frames.flatMap((frame) => frame.statusTexts)));
+  return {
+    viewport: viewportName,
+    journey,
+    stepIndex: index + 1,
+    stepLabel: step.label,
+    action: step.action,
+    contactSheet,
+    firstBadFrame,
+    lastGoodFrame,
+    stateSummary: {
+      frameCount: frames.length,
+      maxVisibleImages: Math.max(0, ...frames.map((frame) => frame.visibleImages)),
+      statusTexts,
+      maxBBoxOverflowCount: Math.max(0, ...frames.map((frame) => frame.bboxOverflowCount)),
+      maxRawLatexMatches: Math.max(0, ...frames.map((frame) => frame.rawLatexMatches))
+    },
+    frames
+  };
+}
+
+function timelineEventToStateChainFrame(event: TimelineEvent): StateChainFrame {
+  return {
+    viewport: event.viewport,
+    journey: event.journey,
+    stepIndex: event.stepIndex,
+    stepLabel: event.stepLabel,
+    action: event.action,
+    event: event.event,
+    phase: statePhaseForEvent(event.event),
+    timestamp: event.timestamp,
+    elapsedMs: event.elapsedMs,
+    screenshot: event.screenshot,
+    bboxPath: event.bboxPath,
+    domPath: event.domPath,
+    bboxOverflowCount: event.bboxOverflows.length,
+    statusTexts: Array.isArray(event.domSummary.statusTexts) ? event.domSummary.statusTexts : [],
+    visibleImages: typeof event.domSummary.visibleImages === "number" ? event.domSummary.visibleImages : 0,
+    rawLatexMatches: typeof event.domSummary.rawLatexMatches === "number" ? event.domSummary.rawLatexMatches : 0,
+    scrollWidth: typeof event.domSummary.scrollWidth === "number" ? event.domSummary.scrollWidth : undefined,
+    clientWidth: typeof event.domSummary.clientWidth === "number" ? event.domSummary.clientWidth : undefined,
+    consoleCount: event.consoleSummary.count,
+    networkFailureCount: event.networkSummary.count
+  };
+}
+
+function statePhaseForEvent(event: string): StateChainFrame["phase"] {
+  if (event === "before-step") {
+    return "before";
+  }
+  if (event.startsWith("uploading") || event === "after-click" || event === "after-file-select" || event === "after-ai-started") {
+    return "during";
+  }
+  if (event === "ready-to-send") {
+    return "ready";
+  }
+  if (event === "after-send" || event === "after-step") {
+    return "after";
+  }
+  return "persisted";
 }
 
 async function writeTimelineContactSheetIndex(timelineDir: string, events: TimelineEvent[]): Promise<string> {
@@ -1015,6 +1151,7 @@ function buildBBoxOverflowFindings(
   return overflows.map((overflow) => {
     const introducedAt = findIntroducedAtStep(overflow, snapshots);
     const introducedAtEvent = findIntroducedAtEvent(overflow, timelineEvents);
+    const stateChainPath = introducedAtEvent ? stateChainPathForEvent(introducedAtEvent) : undefined;
     const classification = classifyBBoxOverflow(overflow, profile.criticalControls);
     const label = overflow.ariaLabel ?? overflow.text ?? overflow.role ?? overflow.selector;
     const overflowText = overflow.overflowLeft > 0
@@ -1040,6 +1177,7 @@ function buildBBoxOverflowFindings(
         screenshot: introducedAtEvent.screenshot,
         bboxPath: introducedAtEvent.bboxPath,
         domPath: introducedAtEvent.domPath,
+        stateChainPath,
         domSummary: introducedAtEvent.domSummary,
         consoleSummary: introducedAtEvent.consoleSummary,
         networkSummary: introducedAtEvent.networkSummary
@@ -1057,7 +1195,8 @@ function buildBBoxOverflowFindings(
         ...(introducedAtEvent ? [
           { type: "screenshot" as const, path: introducedAtEvent.screenshot, detail: `Timeline screenshot captured at event ${introducedAtEvent.event}` },
           { type: "bbox" as const, path: introducedAtEvent.bboxPath, detail: `Timeline bbox captured at event ${introducedAtEvent.event}; selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}; overflowLeft=${overflow.overflowLeft}; overflowRight=${overflow.overflowRight}` },
-          { type: "dom" as const, path: introducedAtEvent.domPath, detail: `Timeline DOM/status summary captured at event ${introducedAtEvent.event}` }
+          { type: "dom" as const, path: introducedAtEvent.domPath, detail: `Timeline DOM/status summary captured at event ${introducedAtEvent.event}` },
+          ...(stateChainPath ? [{ type: "dom" as const, path: stateChainPath, detail: `State-chain manifest for step ${introducedAtEvent.stepIndex} with first bad frame ${introducedAtEvent.event}` }] : [])
         ] : []),
         { type: "bbox", path: introducedAt?.artifactPath, detail: `selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}; overflowLeft=${overflow.overflowLeft}; overflowRight=${overflow.overflowRight}; introducedAtStep=${introducedAt ? `${introducedAt.stepIndex} ${introducedAt.stepLabel}` : "unknown"}` },
         { type: "screenshot", path: introducedAt?.screenshot ?? screenshots.at(-1), detail: introducedAt ? "Screenshot captured at the first step where overflow was observed" : "Latest screenshot after the audited journey" }
@@ -1103,6 +1242,10 @@ export function findIntroducedAtStep(overflow: BBoxOverflow, snapshots: BBoxSnap
 
 export function findIntroducedAtEvent(overflow: BBoxOverflow, timelineEvents: TimelineEvent[]): TimelineEvent | undefined {
   return timelineEvents.find((event) => event.bboxOverflows.some((candidate) => sameOverflowTarget(candidate, overflow)));
+}
+
+function stateChainPathForEvent(event: TimelineEvent): string {
+  return join(dirname(event.screenshot), "state-chain.json");
 }
 
 function sameOverflowTarget(left: BBoxOverflow, right: BBoxOverflow): boolean {

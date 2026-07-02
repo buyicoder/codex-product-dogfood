@@ -33,6 +33,7 @@ describe("schemas", () => {
         screenshot: "/tmp/timeline/uploading-500ms.png",
         bboxPath: "/tmp/timeline/uploading-500ms-bbox.json",
         domPath: "/tmp/timeline/uploading-500ms-dom.json",
+        stateChainPath: "/tmp/timeline/state-chain.json",
         domSummary: { visibleImages: 1, statusTexts: ["Uploading"] },
         consoleSummary: { count: 0, latest: [] },
         networkSummary: { count: 0, latest: [] }
