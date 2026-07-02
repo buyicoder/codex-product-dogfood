@@ -1,5 +1,8 @@
+import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { classifyBBoxOverflow, detectBBoxOverflows, findIntroducedAtStep, type BBoxElement, type BBoxOverflow, type BBoxSnapshot } from "./index.js";
+import { classifyBBoxOverflow, detectBBoxOverflows, findIntroducedAtStep, timelineEventNamesForStep, writeTimelineStepManifest, type BBoxElement, type BBoxOverflow, type BBoxSnapshot, type TimelineEvent } from "./index.js";
 
 describe("bbox overflow detection", () => {
   it("detects visible elements that cross viewport edges", () => {
@@ -113,6 +116,64 @@ describe("bbox overflow detection", () => {
       critical: false,
       severity: "P2",
       reviewOnly: true
+    });
+  });
+
+  it("defines upload timeline keyframes for transient media states", () => {
+    expect(timelineEventNamesForStep({ action: "upload" })).toEqual([
+      "before-step",
+      "after-file-select",
+      "uploading-100ms",
+      "uploading-500ms",
+      "uploading-1s",
+      "ready-to-send"
+    ]);
+    expect(timelineEventNamesForStep({ action: "press" })).toEqual([
+      "before-step",
+      "after-send",
+      "after-ai-started"
+    ]);
+  });
+
+  it("writes per-step timeline manifests with screenshot, bbox, and dom artifacts", async () => {
+    const timelineDir = await mkdtemp(join(tmpdir(), "dogfood-timeline-"));
+    const event: TimelineEvent = {
+      viewport: "mobile",
+      journey: "homework-help",
+      stepIndex: 2,
+      stepLabel: "Try attaching homework evidence",
+      action: "upload",
+      event: "uploading-500ms",
+      timestamp: "2026-07-02T00:00:00.000Z",
+      elapsedMs: 500,
+      screenshot: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms.png",
+      bboxPath: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms-bbox.json",
+      domPath: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms-dom.json",
+      domSummary: {
+        chatInput: true,
+        uploadAffordance: true,
+        statusTexts: ["Uploading image"]
+      },
+      consoleSummary: { count: 0, latest: [] },
+      networkSummary: { count: 0, latest: [] }
+    };
+
+    const manifestPath = await writeTimelineStepManifest(
+      timelineDir,
+      "mobile",
+      "homework-help",
+      1,
+      { action: "upload", label: "Try attaching homework evidence" },
+      [event]
+    );
+    await expect(stat(manifestPath)).resolves.toMatchObject({ isFile: expect.any(Function) });
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { events: TimelineEvent[] };
+
+    expect(manifest.events[0]).toMatchObject({
+      event: "uploading-500ms",
+      screenshot: event.screenshot,
+      bboxPath: event.bboxPath,
+      domPath: event.domPath
     });
   });
 });

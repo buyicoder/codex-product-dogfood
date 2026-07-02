@@ -40,6 +40,7 @@ The runner automatically audits:
 - Opens the URL with Playwright Chromium.
 - Executes profile journeys and steps.
 - Captures screenshots before and after primary actions.
+- Captures fine-grained timeline screenshots for step states such as `before-step`, `after-click`, `after-file-select`, `uploading-100ms`, `uploading-500ms`, `uploading-1s`, `ready-to-send`, `after-send`, and `after-ai-started`.
 - Clicks likely primary entry points based on the selected profile.
 - Fills the best visible input with a realistic test question.
 - Presses Enter to submit.
@@ -49,7 +50,7 @@ The runner automatically audits:
 - Flags mobile composer/status regressions when visible controls have `x < 0` or `x + width > viewportWidth`.
 - Saves per-step bbox snapshots so overflow findings can point to the first audited step where the issue appears.
 - Uses profile-scoped `criticalControls` to keep bbox findings focused on composer, status, upload, voice, and send controls. Critical overflows are P1; other visible overflows are P2 review findings.
-- Writes `report.md`, `findings.json`, `signals.json`, `run.json`, viewport DOM summaries, and `screenshots/`.
+- Writes `report.md`, `findings.json`, `signals.json`, `run.json`, `timeline.json`, viewport DOM summaries, `screenshots/`, and `timeline/`.
 
 ## Review Artifacts
 
@@ -59,11 +60,15 @@ Open `runtime/audits/latest/report.md` first, then inspect:
 - `runtime/audits/latest/screenshots/`
 - `runtime/audits/latest/signals.json`
 - `runtime/audits/latest/run.json`
+- `runtime/audits/latest/timeline.json`
 - `runtime/audits/latest/dom/`
+- `runtime/audits/latest/timeline/`
 
 Mobile layout note: bbox/overflow findings are intended to catch composer, upload, voice, send, and status-copy regressions where controls are clipped or shifted offscreen at mobile widths such as `390x844` and `375x667`.
 When available, bbox findings include `introducedAtStep` and link to the step-level bbox artifact, such as `dom/mobile-first-prompt-03-fill-bbox.json`.
 Profile files may declare `criticalControls` with `selectorIncludes`, `role`, `textIncludes`, or `ariaLabelIncludes` so intentional off-canvas menus do not get treated like broken composer controls.
+
+Timeline note: use `timeline.json` and each `timeline/<viewport>/<journey>/<step>/manifest.json` to review transient upload, send, Markdown table, streaming formula, and composer/status layout states. Each event includes a screenshot path, bbox path, DOM/status summary, and console/network summary.
 
 Treat MVP findings as triage. Confirm screenshot evidence before making strong product claims.
 

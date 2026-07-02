@@ -27,6 +27,7 @@ interface StepResult {
   status: "passed" | "failed" | "skipped";
   screenshot?: string;
   bboxSnapshot?: string;
+  timelineManifest?: string;
   detail?: string;
 }
 
@@ -84,6 +85,38 @@ export interface BBoxOverflowClassification {
   reviewOnly: boolean;
 }
 
+export interface TimelineEvent {
+  viewport: ViewportName;
+  journey: string;
+  stepIndex: number;
+  stepLabel: string;
+  action: string;
+  event: string;
+  timestamp: string;
+  elapsedMs: number;
+  screenshot: string;
+  bboxPath: string;
+  domPath: string;
+  domSummary: Record<string, boolean | number | string | string[]>;
+  consoleSummary: {
+    count: number;
+    latest: string[];
+  };
+  networkSummary: {
+    count: number;
+    latest: string[];
+  };
+}
+
+export interface TimelineStepManifest {
+  viewport: ViewportName;
+  journey: string;
+  stepIndex: number;
+  stepLabel: string;
+  action: string;
+  events: TimelineEvent[];
+}
+
 const execFileAsync = promisify(execFile);
 
 const viewports: Record<ViewportName, { width: number; height: number; isMobile?: boolean }> = {
@@ -100,11 +133,13 @@ export async function runAudit(options: AuditOptions): Promise<AuditReport> {
   const outDir = resolve(options.outDir ?? "runtime/audits/latest");
   const screenshotsDir = join(outDir, "screenshots");
   const domDir = join(outDir, "dom");
+  const timelineDir = join(outDir, "timeline");
   if (!options.keepExisting) {
     await rm(outDir, { recursive: true, force: true });
   }
   await mkdir(screenshotsDir, { recursive: true });
   await mkdir(domDir, { recursive: true });
+  await mkdir(timelineDir, { recursive: true });
   await writeFile(join(outDir, "sample-upload.txt"), "Codex Product Dogfood sample upload.\n");
 
   const run: RunMetadata = {
@@ -121,12 +156,14 @@ export async function runAudit(options: AuditOptions): Promise<AuditReport> {
   const browser = await chromium.launch({ headless: !options.headed });
   const findings: Finding[] = [];
   const signals: RuntimeSignal[] = [];
+  const timelineEvents: TimelineEvent[] = [];
   try {
     for (const viewportName of selectedViewports) {
-      const viewportResult = await auditViewport(browser, profile, selectedJourneys, options.url, viewportName, screenshotsDir, domDir, outDir, options.timeoutMs ?? 15000);
+      const viewportResult = await auditViewport(browser, profile, selectedJourneys, options.url, viewportName, screenshotsDir, domDir, timelineDir, outDir, options.timeoutMs ?? 15000);
       findings.push(...viewportResult.findings);
       signals.push(...viewportResult.signals);
       run.steps.push(...viewportResult.steps);
+      timelineEvents.push(...viewportResult.timelineEvents);
     }
   } finally {
     await browser.close();
@@ -153,6 +190,8 @@ export async function runAudit(options: AuditOptions): Promise<AuditReport> {
   run.durationMs = Date.now() - startedAtMs;
   await writeFile(join(outDir, "signals.json"), `${JSON.stringify(signals, null, 2)}\n`);
   await writeFile(join(outDir, "run.json"), `${JSON.stringify(run, null, 2)}\n`);
+  await writeFile(join(outDir, "timeline.json"), `${JSON.stringify({ events: timelineEvents }, null, 2)}\n`);
+  await writeFile(join(timelineDir, "manifest.json"), `${JSON.stringify({ events: timelineEvents }, null, 2)}\n`);
   await writeReport(outDir, report);
   return report;
 }
@@ -190,9 +229,10 @@ async function auditViewport(
   viewportName: ViewportName,
   screenshotsDir: string,
   domDir: string,
+  timelineDir: string,
   outDir: string,
   timeoutMs: number
-): Promise<{ findings: Finding[]; signals: RuntimeSignal[]; steps: StepResult[] }> {
+): Promise<{ findings: Finding[]; signals: RuntimeSignal[]; steps: StepResult[]; timelineEvents: TimelineEvent[] }> {
   const context = await browser.newContext({
     viewport: viewports[viewportName],
     isMobile: viewports[viewportName].isMobile ?? false
@@ -212,17 +252,19 @@ async function auditViewport(
   const findings: Finding[] = [];
   const signals: RuntimeSignal[] = [];
   const steps: StepResult[] = [];
+  const timelineEvents: TimelineEvent[] = [];
   try {
     for (const journey of journeys) {
-      const journeyResult = await executeJourney(page, profile, journey, url, viewportName, screenshotsDir, domDir, outDir, timeoutMs, consoleErrors, networkFailures);
+      const journeyResult = await executeJourney(page, profile, journey, url, viewportName, screenshotsDir, domDir, timelineDir, outDir, timeoutMs, consoleErrors, networkFailures);
       findings.push(...journeyResult.findings);
       signals.push(journeyResult.signal);
       steps.push(...journeyResult.steps);
+      timelineEvents.push(...journeyResult.timelineEvents);
     }
   } finally {
     await context.close();
   }
-  return { findings, signals, steps };
+  return { findings, signals, steps, timelineEvents };
 }
 
 async function executeJourney(
@@ -233,15 +275,17 @@ async function executeJourney(
   viewportName: ViewportName,
   screenshotsDir: string,
   domDir: string,
+  timelineDir: string,
   outDir: string,
   timeoutMs: number,
   consoleErrors: string[],
   networkFailures: string[]
-): Promise<{ findings: Finding[]; signal: RuntimeSignal; steps: StepResult[] }> {
+): Promise<{ findings: Finding[]; signal: RuntimeSignal; steps: StepResult[]; timelineEvents: TimelineEvent[] }> {
   const screenshots: string[] = [];
   const bboxSnapshots: BBoxSnapshot[] = [];
   const findings: Finding[] = [];
   const steps: StepResult[] = [];
+  const timelineEvents: TimelineEvent[] = [];
   const reproBase = [
     `Open ${url}`,
     `Use ${viewportName} viewport (${viewports[viewportName].width}x${viewports[viewportName].height})`,
@@ -262,7 +306,12 @@ async function executeJourney(
       }
     }
 
+    const stepTimelineEvents: TimelineEvent[] = [];
+    stepTimelineEvents.push(await captureTimelineEvent(page, profile, timelineDir, viewportName, journey.id, index, step, "before-step", consoleErrors, networkFailures));
     const result = await executeStep(page, profile, step, url, outDir, timeoutMs);
+    stepTimelineEvents.push(...await capturePostStepTimeline(page, profile, step, timelineDir, viewportName, journey.id, index, consoleErrors, networkFailures));
+    timelineEvents.push(...stepTimelineEvents);
+    const timelineManifest = await writeTimelineStepManifest(timelineDir, viewportName, journey.id, index, step, stepTimelineEvents);
     if (step.action === "open" && result.status === "passed") {
       opened = true;
     }
@@ -270,7 +319,7 @@ async function executeJourney(
     screenshots.push(screenshot);
     const bboxSnapshot = await captureBBoxSnapshot(page, domDir, viewportName, journey.id, index, step, screenshot);
     bboxSnapshots.push(bboxSnapshot);
-    steps.push({ journey: journey.id, step: step.label, action: step.action, status: result.status, screenshot, bboxSnapshot: bboxSnapshot.artifactPath, detail: result.detail });
+    steps.push({ journey: journey.id, step: step.label, action: step.action, status: result.status, screenshot, bboxSnapshot: bboxSnapshot.artifactPath, timelineManifest, detail: result.detail });
     if (result.status === "failed") {
       findings.push(stepFailureFinding(profile, journey, step, viewportName, result.detail, screenshot, reproBase));
     }
@@ -290,7 +339,8 @@ async function executeJourney(
   return {
     findings,
     signal: { viewport: viewportName, journey: journey.id, consoleErrors: [...consoleErrors], networkFailures: [...networkFailures], domSignals, screenshots },
-    steps
+    steps,
+    timelineEvents
   };
 }
 
@@ -385,6 +435,178 @@ async function captureBBoxSnapshot(
   };
   await writeFile(artifactPath, `${JSON.stringify({ viewportWidth: viewports[viewportName].width, ...snapshot }, null, 2)}\n`);
   return snapshot;
+}
+
+async function capturePostStepTimeline(
+  page: Page,
+  profile: AuditProfile,
+  step: JourneyStep,
+  timelineDir: string,
+  viewportName: ViewportName,
+  journey: string,
+  index: number,
+  consoleErrors: string[],
+  networkFailures: string[]
+): Promise<TimelineEvent[]> {
+  const events: TimelineEvent[] = [];
+  for (const event of timelineEventNamesForStep(step).slice(1)) {
+    await waitBeforeTimelineEvent(page, event);
+    events.push(await captureTimelineEvent(page, profile, timelineDir, viewportName, journey, index, step, event, consoleErrors, networkFailures));
+  }
+  return events;
+}
+
+async function captureTimelineEvent(
+  page: Page,
+  profile: AuditProfile,
+  timelineDir: string,
+  viewportName: ViewportName,
+  journey: string,
+  index: number,
+  step: JourneyStep,
+  event: string,
+  consoleErrors: string[],
+  networkFailures: string[]
+): Promise<TimelineEvent> {
+  const directory = join(timelineDir, viewportName, journey, `${String(index + 1).padStart(2, "0")}-${slug(step.action)}`);
+  await mkdir(directory, { recursive: true });
+  const prefix = `${String(eventOrder(event)).padStart(3, "0")}-${slug(event)}`;
+  const screenshot = join(directory, `${prefix}.png`);
+  const bboxPath = join(directory, `${prefix}-bbox.json`);
+  const domPath = join(directory, `${prefix}-dom.json`);
+  await page.screenshot({ path: screenshot, fullPage: true });
+  const bboxElements = await collectBBoxElements(page);
+  const bboxOverflows = detectBBoxOverflows(bboxElements, viewports[viewportName].width);
+  const domSummary = await collectTimelineDomSummary(page, profile);
+  await writeFile(bboxPath, `${JSON.stringify({ viewportWidth: viewports[viewportName].width, elements: bboxElements, overflows: bboxOverflows }, null, 2)}\n`);
+  await writeFile(domPath, `${JSON.stringify(domSummary, null, 2)}\n`);
+  return {
+    viewport: viewportName,
+    journey,
+    stepIndex: index + 1,
+    stepLabel: step.label,
+    action: step.action,
+    event,
+    timestamp: new Date().toISOString(),
+    elapsedMs: eventElapsedMs(event),
+    screenshot,
+    bboxPath,
+    domPath,
+    domSummary,
+    consoleSummary: {
+      count: consoleErrors.length,
+      latest: consoleErrors.slice(-5)
+    },
+    networkSummary: {
+      count: networkFailures.length,
+      latest: networkFailures.slice(-5)
+    }
+  };
+}
+
+export async function writeTimelineStepManifest(
+  timelineDir: string,
+  viewportName: ViewportName,
+  journey: string,
+  index: number,
+  step: JourneyStep,
+  events: TimelineEvent[]
+): Promise<string> {
+  const directory = join(timelineDir, viewportName, journey, `${String(index + 1).padStart(2, "0")}-${slug(step.action)}`);
+  await mkdir(directory, { recursive: true });
+  const manifestPath = join(directory, "manifest.json");
+  const manifest: TimelineStepManifest = {
+    viewport: viewportName,
+    journey,
+    stepIndex: index + 1,
+    stepLabel: step.label,
+    action: step.action,
+    events
+  };
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifestPath;
+}
+
+export function timelineEventNamesForStep(step: Pick<JourneyStep, "action">): string[] {
+  if (step.action === "click") {
+    return ["before-step", "after-click"];
+  }
+  if (step.action === "upload") {
+    return ["before-step", "after-file-select", "uploading-100ms", "uploading-500ms", "uploading-1s", "ready-to-send"];
+  }
+  if (step.action === "press") {
+    return ["before-step", "after-send", "after-ai-started"];
+  }
+  return ["before-step", "after-step"];
+}
+
+async function waitBeforeTimelineEvent(page: Page, event: string): Promise<void> {
+  if (event === "uploading-100ms") {
+    await page.waitForTimeout(100);
+  } else if (event === "uploading-500ms") {
+    await page.waitForTimeout(400);
+  } else if (event === "uploading-1s") {
+    await page.waitForTimeout(500);
+  } else if (event === "ready-to-send") {
+    await page.waitForTimeout(250);
+  } else if (event === "after-ai-started") {
+    await page.waitForTimeout(500);
+  }
+}
+
+async function collectTimelineDomSummary(page: Page, profile: AuditProfile): Promise<Record<string, boolean | number | string | string[]>> {
+  const domSignals = await collectDomSignals(page, profile);
+  const statusSummary = await page.evaluate(() => {
+    const statusTexts = Array.from(document.querySelectorAll("[role='status'], [aria-live]"))
+      .map((element) => (element.textContent ?? "").trim().replace(/\s+/g, " "))
+      .filter(Boolean)
+      .slice(0, 10);
+    const visibleImages = Array.from(document.querySelectorAll("img"))
+      .filter((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      }).length;
+    const rawLatexMatches = (document.body.innerText.match(/\\(?:frac|sqrt|begin|end)|\$\$/g) ?? []).length;
+    return {
+      url: window.location.href,
+      statusTexts,
+      visibleImages,
+      rawLatexMatches,
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth
+    };
+  });
+  return { ...domSignals, ...statusSummary };
+}
+
+function eventOrder(event: string): number {
+  const order: Record<string, number> = {
+    "before-step": 0,
+    "after-click": 1,
+    "after-file-select": 2,
+    "uploading-100ms": 3,
+    "uploading-500ms": 4,
+    "uploading-1s": 5,
+    "ready-to-send": 6,
+    "after-send": 7,
+    "after-ai-started": 8,
+    "after-step": 9
+  };
+  return order[event] ?? 99;
+}
+
+function eventElapsedMs(event: string): number {
+  if (event === "uploading-100ms") {
+    return 100;
+  }
+  if (event === "uploading-500ms") {
+    return 500;
+  }
+  if (event === "uploading-1s") {
+    return 1000;
+  }
+  return 0;
 }
 
 async function clickTarget(page: Page, target: TargetConfig | undefined, fallbackKeywords: string[]): Promise<boolean> {

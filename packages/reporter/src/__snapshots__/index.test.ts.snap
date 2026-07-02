@@ -48,6 +48,7 @@ exports[`reporter > renders a markdown report with summary and findings 1`] = `
 ## Manual Review Checklist
 
 - Review every screenshot linked from P0/P1 findings.
+- Review \`timeline.json\` and per-step timeline manifests for upload, send, streaming formula, Markdown table, and composer/status state sequences.
 - Mark heuristic-only missing-signal findings as confirmed or false positive.
 - Check mobile and small-mobile screenshots for blocked primary actions.
 - Check bbox/overflow findings for composer, upload, voice, send, and status elements shifted outside the viewport.
@@ -55,6 +56,8 @@ exports[`reporter > renders a markdown report with summary and findings 1`] = `
 
 ## Evidence Inventory
 
+- Timeline manifest: \`timeline.json\`
+- Per-step timeline manifests: \`timeline/<viewport>/<journey>/<step>/manifest.json\`
 - screenshots/desktop.png
 
 "

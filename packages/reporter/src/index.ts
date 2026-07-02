@@ -126,6 +126,7 @@ export function renderMarkdownReport(outDir: string, report: AuditReport): strin
   lines.push("## Manual Review Checklist");
   lines.push("");
   lines.push("- Review every screenshot linked from P0/P1 findings.");
+  lines.push("- Review `timeline.json` and per-step timeline manifests for upload, send, streaming formula, Markdown table, and composer/status state sequences.");
   lines.push("- Mark heuristic-only missing-signal findings as confirmed or false positive.");
   lines.push("- Check mobile and small-mobile screenshots for blocked primary actions.");
   lines.push("- Check bbox/overflow findings for composer, upload, voice, send, and status elements shifted outside the viewport.");
@@ -133,6 +134,8 @@ export function renderMarkdownReport(outDir: string, report: AuditReport): strin
   lines.push("");
   lines.push("## Evidence Inventory");
   lines.push("");
+  lines.push("- Timeline manifest: `timeline.json`");
+  lines.push("- Per-step timeline manifests: `timeline/<viewport>/<journey>/<step>/manifest.json`");
   const screenshots = new Set<string>();
   for (const finding of findings) {
     for (const evidence of finding.evidence) {
