@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
-import { getProfile, loadProfileFile, type AuditJourney, type AuditProfile, type JourneyStep, type TargetConfig } from "@codex-product-dogfood/profiles";
+import { getProfile, loadProfileFile, type AuditJourney, type AuditProfile, type CriticalControlRule, type JourneyStep, type TargetConfig } from "@codex-product-dogfood/profiles";
 import type { AuditReport, Finding, ProfileName, RuntimeSignal, Severity, ViewportName } from "@codex-product-dogfood/schemas";
 import { assertFindingShape, countFindings } from "@codex-product-dogfood/schemas";
 import { buildDevelopmentPlan, scoreMaturity, writeReport } from "@codex-product-dogfood/reporter";
@@ -75,6 +75,13 @@ export interface BBoxSnapshot {
   artifactPath?: string;
   elements: BBoxElement[];
   overflows: BBoxOverflow[];
+}
+
+export interface BBoxOverflowClassification {
+  critical: boolean;
+  controlName?: string;
+  severity: Severity;
+  reviewOnly: boolean;
 }
 
 const execFileAsync = promisify(execFile);
@@ -277,7 +284,7 @@ async function executeJourney(
   domSignals.bboxOverflowCount = bboxOverflows.length;
   const expectedSignals = Array.from(new Set([...profile.expectedSignals, ...journey.steps.flatMap((step) => step.expectedSignals ?? [])]));
   findings.push(...buildSignalFindings(profile, journey.id, viewportName, expectedSignals, domSignals, screenshots, reproBase));
-  findings.push(...buildBBoxOverflowFindings(journey.id, viewportName, bboxOverflows, bboxSnapshots, screenshots, reproBase));
+  findings.push(...buildBBoxOverflowFindings(profile, journey.id, viewportName, bboxOverflows, bboxSnapshots, screenshots, reproBase));
   findings.push(...buildRuntimeFindings(viewportName, journey.id, consoleErrors, networkFailures, screenshots, reproBase));
 
   return {
@@ -613,6 +620,7 @@ function buildSignalFindings(
 }
 
 function buildBBoxOverflowFindings(
+  profile: AuditProfile,
   journeyId: string,
   viewport: ViewportName,
   overflows: BBoxOverflow[],
@@ -622,20 +630,27 @@ function buildBBoxOverflowFindings(
 ): Finding[] {
   return overflows.map((overflow) => {
     const introducedAt = findIntroducedAtStep(overflow, snapshots);
+    const classification = classifyBBoxOverflow(overflow, profile.criticalControls);
     const label = overflow.ariaLabel ?? overflow.text ?? overflow.role ?? overflow.selector;
     const overflowText = overflow.overflowLeft > 0
       ? `x is ${overflow.bbox.x}, ${overflow.overflowLeft}px beyond the left viewport edge`
       : `x + width is ${overflow.bbox.x + overflow.bbox.width}, ${overflow.overflowRight}px beyond viewport width ${overflow.viewportWidth}`;
     return {
-      severity: "P1",
-      title: `Interactive element overflows viewport: ${label}`,
+      severity: classification.severity,
+      title: classification.critical
+        ? `Critical ${classification.controlName} control overflows viewport: ${label}`
+        : `Review non-critical element overflow: ${label}`,
       journey: journeyId,
       viewport,
       introducedAtStep: introducedAt ? { index: introducedAt.stepIndex, label: introducedAt.stepLabel, action: introducedAt.action } : undefined,
-      confidence: "high",
-      tags: ["bbox", "overflow", "layout", viewport],
-      userSymptom: "A mobile user may see composer/status controls clipped, shifted offscreen, or hard to tap.",
-      expected: "Visible interactive and status elements should stay fully inside the viewport.",
+      confidence: classification.critical ? "high" : "medium",
+      tags: ["bbox", "overflow", "layout", viewport, classification.critical ? "critical-control" : "review", ...(classification.controlName ? [`control:${classification.controlName}`] : [])],
+      userSymptom: classification.critical
+        ? "A mobile user may see composer/status controls clipped, shifted offscreen, or hard to tap."
+        : "A visible element leaves the viewport and should be reviewed to distinguish intentional off-canvas UI from a layout bug.",
+      expected: classification.critical
+        ? "Visible critical composer/status/upload/voice/send controls should stay fully inside the viewport."
+        : "Non-critical visible elements should either stay inside the viewport or be explicitly marked as intentional off-canvas UI.",
       actual: `${overflowText}. Selector: ${overflow.selector}. BBox: ${JSON.stringify(overflow.bbox)}.`,
       evidence: [
         { type: "bbox", path: introducedAt?.artifactPath, detail: `selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}; introducedAtStep=${introducedAt ? `${introducedAt.stepIndex} ${introducedAt.stepLabel}` : "unknown"}` },
@@ -643,12 +658,37 @@ function buildBBoxOverflowFindings(
       ],
       reproSteps: [...reproBase, ...(introducedAt ? [`Run step ${introducedAt.stepIndex}: ${introducedAt.stepLabel} (${introducedAt.action})`] : []), `Inspect ${overflow.selector} bounding box`],
       acceptanceCriteria: [
-        "The element has x >= 0 and x + width <= viewport width on mobile and small-mobile.",
+        classification.critical
+          ? "The critical control has x >= 0 and x + width <= viewport width on mobile and small-mobile."
+          : "The element is either contained within the viewport or documented as intentional off-canvas UI.",
         "Status, upload, voice, and send controls do not push each other outside the viewport.",
         "Long state copy wraps, truncates, or reserves space without clipping primary controls."
       ]
     };
   });
+}
+
+export function classifyBBoxOverflow(overflow: BBoxOverflow, criticalControls: CriticalControlRule[]): BBoxOverflowClassification {
+  const matched = criticalControls.find((control) => matchesCriticalControl(overflow, control));
+  if (matched) {
+    return { critical: true, controlName: matched.name, severity: "P1", reviewOnly: false };
+  }
+  return { critical: false, severity: "P2", reviewOnly: true };
+}
+
+function matchesCriticalControl(overflow: BBoxOverflow, control: CriticalControlRule): boolean {
+  return matchesAny(overflow.selector, control.selectorIncludes)
+    || matchesAny(overflow.role, control.role)
+    || matchesAny(overflow.text, control.textIncludes)
+    || matchesAny(overflow.ariaLabel, control.ariaLabelIncludes);
+}
+
+function matchesAny(value: string | undefined, needles: string[] | undefined): boolean {
+  if (!value || !needles?.length) {
+    return false;
+  }
+  const normalized = value.toLowerCase();
+  return needles.some((needle) => normalized.includes(needle.toLowerCase()));
 }
 
 export function findIntroducedAtStep(overflow: BBoxOverflow, snapshots: BBoxSnapshot[]): BBoxSnapshot | undefined {
@@ -758,7 +798,7 @@ function tagsForFinding(finding: Finding): string[] {
   if (finding.title.includes("Missing expected")) {
     tags.add("missing-signal");
   }
-  if (finding.title.includes("overflows viewport")) {
+  if (finding.title.includes("overflows viewport") || finding.title.includes("element overflow")) {
     tags.add("bbox");
     tags.add("overflow");
     tags.add("layout");

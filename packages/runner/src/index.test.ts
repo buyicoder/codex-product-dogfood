@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectBBoxOverflows, findIntroducedAtStep, type BBoxElement, type BBoxOverflow, type BBoxSnapshot } from "./index.js";
+import { classifyBBoxOverflow, detectBBoxOverflows, findIntroducedAtStep, type BBoxElement, type BBoxOverflow, type BBoxSnapshot } from "./index.js";
 
 describe("bbox overflow detection", () => {
   it("detects visible elements that cross viewport edges", () => {
@@ -78,6 +78,41 @@ describe("bbox overflow detection", () => {
       action: "upload",
       screenshot: "/tmp/upload.png",
       artifactPath: "/tmp/upload-bbox.json"
+    });
+  });
+
+  it("classifies critical profile controls as P1 and other overflows as review P2", () => {
+    const sendOverflow: BBoxOverflow = {
+      selector: "button[aria-label=\"Send\"]",
+      ariaLabel: "Send",
+      bbox: { x: 370, y: 700, width: 44, height: 44 },
+      viewportWidth: 390,
+      overflowLeft: 0,
+      overflowRight: 24
+    };
+    const menuOverflow: BBoxOverflow = {
+      selector: "nav[aria-label=\"Menu\"]",
+      ariaLabel: "Menu",
+      bbox: { x: -240, y: 0, width: 260, height: 844 },
+      viewportWidth: 390,
+      overflowLeft: 240,
+      overflowRight: 0
+    };
+
+    const criticalControls = [
+      { name: "send", ariaLabelIncludes: ["send"], textIncludes: ["send"] }
+    ];
+
+    expect(classifyBBoxOverflow(sendOverflow, criticalControls)).toEqual({
+      critical: true,
+      controlName: "send",
+      severity: "P1",
+      reviewOnly: false
+    });
+    expect(classifyBBoxOverflow(menuOverflow, criticalControls)).toEqual({
+      critical: false,
+      severity: "P2",
+      reviewOnly: true
     });
   });
 });

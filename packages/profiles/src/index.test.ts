@@ -32,6 +32,40 @@ describe("profiles", () => {
 
     expect(profile.primaryEntryKeywords).toEqual([]);
     expect(profile.failureSignals).toContain("error");
+    expect(profile.criticalControls).toEqual([]);
     expect(profile.journeys[0]?.steps[0]?.label).toBe("open");
+  });
+
+  it("normalizes profile-scoped critical controls", () => {
+    const profile = normalizeProfile({
+      name: "custom",
+      description: "Custom profile",
+      testQuestion: "Question?",
+      criticalControls: [
+        { name: "composer", selectorIncludes: ["textarea"], ariaLabelIncludes: ["message"] }
+      ],
+      journeys: [
+        {
+          id: "first-run",
+          title: "First run",
+          userGoal: "Start",
+          steps: [{ action: "open" }]
+        }
+      ]
+    });
+
+    expect(profile.criticalControls).toEqual([
+      { name: "composer", selectorIncludes: ["textarea"], ariaLabelIncludes: ["message"] }
+    ]);
+  });
+
+  it("declares student-learning critical controls", () => {
+    expect(getProfile("student-learning").criticalControls.map((control) => control.name)).toEqual([
+      "composer",
+      "status",
+      "upload",
+      "voice",
+      "send"
+    ]);
   });
 });

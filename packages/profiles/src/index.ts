@@ -35,6 +35,14 @@ export interface AuditJourney {
   steps: JourneyStep[];
 }
 
+export interface CriticalControlRule {
+  name: string;
+  selectorIncludes?: string[];
+  role?: string[];
+  textIncludes?: string[];
+  ariaLabelIncludes?: string[];
+}
+
 export interface AuditProfile {
   name: string;
   description: string;
@@ -43,6 +51,7 @@ export interface AuditProfile {
   primaryEntryKeywords: string[];
   expectedSignals: string[];
   failureSignals: string[];
+  criticalControls: CriticalControlRule[];
   journeys: AuditJourney[];
 }
 
@@ -82,6 +91,13 @@ export const profiles: Record<ProfileName, AuditProfile> = {
     primaryEntryKeywords: ["chat", "ask", "new", "start", "send", "开始", "提问", "聊天", "问"],
     expectedSignals: ["chatInput", "sendAction", "emptyState", "uploadAffordance", "voiceAffordance"],
     failureSignals: sharedFailureSignals,
+    criticalControls: [
+      { name: "composer", selectorIncludes: ["textarea", "input[type='text']", "[role=\"textbox\"]"] },
+      { name: "status", role: ["status"], selectorIncludes: ["[role=\"status\"]"] },
+      { name: "upload", selectorIncludes: ["input[type='file']"], textIncludes: ["upload", "attach", "上传", "附件"], ariaLabelIncludes: ["upload", "attach", "上传", "附件"] },
+      { name: "voice", textIncludes: ["voice", "mic", "microphone", "语音", "麦克风"], ariaLabelIncludes: ["voice", "mic", "microphone", "语音", "麦克风"] },
+      { name: "send", textIncludes: ["send", "submit", "发送", "提交"], ariaLabelIncludes: ["send", "submit", "发送", "提交"] }
+    ],
     journeys: [
       {
         id: "first-prompt",
@@ -114,6 +130,13 @@ export const profiles: Record<ProfileName, AuditProfile> = {
     primaryEntryKeywords: ["learn", "practice", "start", "question", "homework", "学习", "练习", "开始", "题目", "作业", "答疑"],
     expectedSignals: ["learningEntry", "chatInput", "formulaAffordance", "uploadAffordance", "voiceAffordance", "emptyState"],
     failureSignals: sharedFailureSignals,
+    criticalControls: [
+      { name: "composer", selectorIncludes: ["textarea", "input[type='text']", "[role=\"textbox\"]", "[contenteditable"] },
+      { name: "status", role: ["status"], selectorIncludes: ["[role=\"status\"]", "[aria-live"] },
+      { name: "upload", selectorIncludes: ["input[type='file']"], textIncludes: ["upload", "attach", "file", "上传", "附件", "拍照", "图片"], ariaLabelIncludes: ["upload", "attach", "file", "上传", "附件", "拍照", "图片"] },
+      { name: "voice", textIncludes: ["voice", "mic", "microphone", "record", "语音", "麦克风", "录音"], ariaLabelIncludes: ["voice", "mic", "microphone", "record", "语音", "麦克风", "录音"] },
+      { name: "send", textIncludes: ["send", "submit", "ask", "发送", "提交", "提问"], ariaLabelIncludes: ["send", "submit", "ask", "发送", "提交", "提问"] }
+    ],
     journeys: [
       {
         id: "start-learning",
@@ -194,6 +217,7 @@ export function normalizeProfile(config: unknown): AuditProfile {
     primaryEntryKeywords: normalizeStringArray(config.primaryEntryKeywords),
     expectedSignals: normalizeStringArray(config.expectedSignals),
     failureSignals: normalizeStringArray(config.failureSignals, sharedFailureSignals),
+    criticalControls: normalizeCriticalControls(config.criticalControls),
     journeys
   };
 }
@@ -274,6 +298,27 @@ function normalizeSeverity(value: unknown, path: string): Severity | undefined {
   return value;
 }
 
+function normalizeCriticalControls(value: unknown): CriticalControlRule[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("profile.criticalControls must be an array.");
+  }
+  return value.map((item, index) => {
+    if (!isObject(item)) {
+      throw new Error(`profile.criticalControls[${index}] must be an object.`);
+    }
+    return {
+      name: requireString(item, "name", `profile.criticalControls[${index}]`),
+      selectorIncludes: normalizeOptionalStringArray(item.selectorIncludes, `profile.criticalControls[${index}].selectorIncludes`),
+      role: normalizeOptionalStringArray(item.role, `profile.criticalControls[${index}].role`),
+      textIncludes: normalizeOptionalStringArray(item.textIncludes, `profile.criticalControls[${index}].textIncludes`),
+      ariaLabelIncludes: normalizeOptionalStringArray(item.ariaLabelIncludes, `profile.criticalControls[${index}].ariaLabelIncludes`)
+    };
+  });
+}
+
 function requireString(record: Record<string, unknown>, key: string, path = "profile"): string {
   const value = record[key];
   if (typeof value !== "string" || value.trim() === "") {
@@ -300,6 +345,16 @@ function normalizeStringArray(value: unknown, fallback: string[] = []): string[]
   }
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
     throw new Error("Expected an array of strings.");
+  }
+  return [...value];
+}
+
+function normalizeOptionalStringArray(value: unknown, path: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error(`${path} must be an array of strings.`);
   }
   return [...value];
 }

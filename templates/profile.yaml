@@ -10,6 +10,24 @@ expectedSignals:
   - chatInput
 failureSignals:
   - error
+criticalControls:
+  - name: composer
+    selectorIncludes:
+      - textarea
+      - "[role=\"textbox\"]"
+  - name: status
+    role:
+      - status
+  - name: upload
+    selectorIncludes:
+      - "input[type='file']"
+    ariaLabelIncludes:
+      - upload
+      - attach
+  - name: send
+    ariaLabelIncludes:
+      - send
+      - submit
 journeys:
   - id: first-run
     title: First run

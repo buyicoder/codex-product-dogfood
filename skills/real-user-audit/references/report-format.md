@@ -11,5 +11,6 @@ The report should include:
 - Manual review checklist for false positives and screenshot review.
 - Bbox/overflow findings for mobile composer, upload, voice, send, and status controls that leave the viewport.
 - `introducedAtStep` for bbox/overflow findings when per-step snapshots identify the first step where overflow appears.
+- Profile-scoped critical-control classification so composer/status/upload/voice/send overflows stay high priority while unrelated off-canvas UI can be review-only.
 
 The JSON report should preserve the same finding fields for automation.
