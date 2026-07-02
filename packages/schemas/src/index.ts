@@ -24,6 +24,28 @@ export interface Finding {
     label: string;
     action: string;
   };
+  introducedAtEvent?: {
+    viewport?: ViewportName;
+    journey?: string;
+    stepIndex?: number;
+    stepLabel?: string;
+    action?: string;
+    event: string;
+    timestamp?: string;
+    elapsedMs?: number;
+    screenshot?: string;
+    bboxPath?: string;
+    domPath?: string;
+    domSummary?: Record<string, boolean | number | string | string[]>;
+    consoleSummary?: {
+      count: number;
+      latest: string[];
+    };
+    networkSummary?: {
+      count: number;
+      latest: string[];
+    };
+  };
   affectedViewports?: ViewportName[];
   tags?: string[];
   userSymptom: string;

@@ -11,6 +11,28 @@ function finding(severity: Finding["severity"], title = `${severity} finding`): 
     userSymptom: "User sees a problem.",
     expected: "The flow works.",
     actual: "The flow is broken.",
+    introducedAtEvent: {
+      viewport: "mobile",
+      journey: "homework-help",
+      stepIndex: 2,
+      stepLabel: "Try attaching homework evidence",
+      action: "upload",
+      event: "uploading-500ms",
+      elapsedMs: 500,
+      screenshot: "/tmp/audit/timeline/mobile/homework-help/02-upload/004-uploading-500ms.png",
+      bboxPath: "/tmp/audit/timeline/mobile/homework-help/02-upload/004-uploading-500ms-bbox.json",
+      domPath: "/tmp/audit/timeline/mobile/homework-help/02-upload/004-uploading-500ms-dom.json",
+      domSummary: {
+        statusTexts: ["Uploading image"],
+        visibleImages: 1,
+        imageSummaries: ["img[0] 80x60 natural=800x600 alt=\"homework\""],
+        rawLatexMatches: 0,
+        scrollWidth: 440,
+        clientWidth: 390
+      },
+      consoleSummary: { count: 0, latest: [] },
+      networkSummary: { count: 0, latest: [] }
+    },
     evidence: [{ type: "screenshot", path: "/tmp/audit/screenshots/desktop.png", detail: "Final screenshot" }],
     reproSteps: ["Open page"],
     acceptanceCriteria: ["Flow works"]

@@ -76,6 +76,30 @@ export function renderMarkdownReport(outDir: string, report: AuditReport): strin
         if (finding.introducedAtStep) {
           lines.push(`- Introduced at step: ${finding.introducedAtStep.index}. ${finding.introducedAtStep.label} (${finding.introducedAtStep.action})`);
         }
+        if (finding.introducedAtEvent) {
+          const event = finding.introducedAtEvent;
+          const eventStep = event.stepIndex && event.stepLabel ? ` in step ${event.stepIndex}. ${event.stepLabel}` : "";
+          lines.push(`- Introduced at event: ${event.event}${event.elapsedMs ? ` (${event.elapsedMs}ms)` : ""}${eventStep}`);
+          if (event.screenshot) {
+            lines.push(`- Introduced screenshot: ${relative(dirname(`${outDir}/report.md`), event.screenshot)}`);
+          }
+          if (event.bboxPath) {
+            lines.push(`- Introduced bbox: ${relative(dirname(`${outDir}/report.md`), event.bboxPath)}`);
+          }
+          if (event.domPath) {
+            lines.push(`- Introduced DOM: ${relative(dirname(`${outDir}/report.md`), event.domPath)}`);
+          }
+          const domSummary = summarizeIntroducedEventDom(event.domSummary);
+          if (domSummary) {
+            lines.push(`- Introduced DOM summary: ${domSummary}`);
+          }
+          if (event.consoleSummary) {
+            lines.push(`- Console near event: ${event.consoleSummary.count}${event.consoleSummary.latest.length ? ` (${event.consoleSummary.latest.slice(-3).join(" | ")})` : ""}`);
+          }
+          if (event.networkSummary) {
+            lines.push(`- Network near event: ${event.networkSummary.count}${event.networkSummary.latest.length ? ` (${event.networkSummary.latest.slice(-3).join(" | ")})` : ""}`);
+          }
+        }
         if (finding.confidence) {
           lines.push(`- Confidence: ${finding.confidence}`);
         }
@@ -154,6 +178,30 @@ export function renderMarkdownReport(outDir: string, report: AuditReport): strin
   }
   lines.push("");
   return `${lines.join("\n")}\n`;
+}
+
+function summarizeIntroducedEventDom(domSummary: Record<string, boolean | number | string | string[]> | undefined): string | undefined {
+  if (!domSummary || typeof domSummary !== "object") {
+    return undefined;
+  }
+  const summary = domSummary as Record<string, boolean | number | string | string[]>;
+  const parts: string[] = [];
+  if (Array.isArray(summary.statusTexts) && summary.statusTexts.length) {
+    parts.push(`status="${summary.statusTexts.slice(0, 3).join(" | ")}"`);
+  }
+  if (typeof summary.visibleImages === "number") {
+    parts.push(`visibleImages=${summary.visibleImages}`);
+  }
+  if (Array.isArray(summary.imageSummaries) && summary.imageSummaries.length) {
+    parts.push(`images=${summary.imageSummaries.slice(0, 2).join(" | ")}`);
+  }
+  if (typeof summary.rawLatexMatches === "number") {
+    parts.push(`rawLatexMatches=${summary.rawLatexMatches}`);
+  }
+  if (typeof summary.scrollWidth === "number" && typeof summary.clientWidth === "number") {
+    parts.push(`scroll/client=${summary.scrollWidth}/${summary.clientWidth}`);
+  }
+  return parts.join("; ") || undefined;
 }
 
 function severityRank(severity: Finding["severity"]): number {

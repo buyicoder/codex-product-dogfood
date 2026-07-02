@@ -2,7 +2,7 @@ import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { classifyBBoxOverflow, detectBBoxOverflows, findIntroducedAtStep, timelineEventNamesForStep, writeTimelineStepContactSheet, writeTimelineStepManifest, type BBoxElement, type BBoxOverflow, type BBoxSnapshot, type TimelineEvent } from "./index.js";
+import { classifyBBoxOverflow, detectBBoxOverflows, findIntroducedAtEvent, findIntroducedAtStep, timelineEventNamesForStep, writeTimelineStepContactSheet, writeTimelineStepManifest, type BBoxElement, type BBoxOverflow, type BBoxSnapshot, type TimelineEvent } from "./index.js";
 
 describe("bbox overflow detection", () => {
   it("detects visible elements that cross viewport edges", () => {
@@ -84,6 +84,51 @@ describe("bbox overflow detection", () => {
     });
   });
 
+  it("finds the first timeline event that introduced an overflow", () => {
+    const overflow: BBoxOverflow = {
+      selector: "div[role=\"status\"]",
+      role: "status",
+      text: "Uploading a very long filename",
+      bbox: { x: 300, y: 720, width: 140, height: 24 },
+      viewportWidth: 390,
+      overflowLeft: 0,
+      overflowRight: 50
+    };
+    const baseEvent = {
+      viewport: "mobile" as const,
+      journey: "homework-help",
+      stepIndex: 2,
+      stepLabel: "Try attaching homework evidence",
+      action: "upload",
+      timestamp: "2026-07-02T00:00:00.000Z",
+      elapsedMs: 0,
+      screenshot: "/tmp/timeline/mobile/homework-help/02-upload/000-before-step.png",
+      bboxPath: "/tmp/timeline/mobile/homework-help/02-upload/000-before-step-bbox.json",
+      domPath: "/tmp/timeline/mobile/homework-help/02-upload/000-before-step-dom.json",
+      domSummary: {},
+      consoleSummary: { count: 0, latest: [] },
+      networkSummary: { count: 0, latest: [] }
+    };
+    const events: TimelineEvent[] = [
+      { ...baseEvent, event: "before-step", bboxOverflows: [] },
+      {
+        ...baseEvent,
+        event: "uploading-500ms",
+        elapsedMs: 500,
+        screenshot: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms.png",
+        bboxPath: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms-bbox.json",
+        bboxOverflows: [overflow]
+      }
+    ];
+
+    expect(findIntroducedAtEvent(overflow, events)).toMatchObject({
+      event: "uploading-500ms",
+      elapsedMs: 500,
+      screenshot: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms.png",
+      bboxPath: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms-bbox.json"
+    });
+  });
+
   it("classifies critical profile controls as P1 and other overflows as review P2", () => {
     const sendOverflow: BBoxOverflow = {
       selector: "button[aria-label=\"Send\"]",
@@ -148,11 +193,24 @@ describe("bbox overflow detection", () => {
       elapsedMs: 500,
       screenshot: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms.png",
       bboxPath: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms-bbox.json",
+      bboxOverflows: [{
+        selector: "div[role=\"status\"]",
+        role: "status",
+        text: "Uploading image",
+        bbox: { x: 300, y: 720, width: 140, height: 24 },
+        viewportWidth: 390,
+        overflowLeft: 0,
+        overflowRight: 50
+      }],
       domPath: "/tmp/timeline/mobile/homework-help/02-upload/004-uploading-500ms-dom.json",
       domSummary: {
         chatInput: true,
         uploadAffordance: true,
-        statusTexts: ["Uploading image"]
+        statusTexts: ["Uploading image"],
+        visibleImages: 1,
+        imageSummaries: ["img[0] 80x60 natural=800x600 alt=\"homework\""],
+        scrollWidth: 440,
+        clientWidth: 390
       },
       consoleSummary: { count: 0, latest: [] },
       networkSummary: { count: 0, latest: [] }
@@ -188,6 +246,8 @@ describe("bbox overflow detection", () => {
       domPath: event.domPath
     });
     expect(contactSheet).toContain("uploading-500ms");
+    expect(contactSheet).toContain("FIRST BAD FRAME");
+    expect(contactSheet).toContain("Images: 1");
     expect(contactSheet).toContain("004-uploading-500ms.png");
     expect(contactSheet).toContain("004-uploading-500ms-bbox.json");
     expect(contactSheet).toContain("004-uploading-500ms-dom.json");

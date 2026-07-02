@@ -97,6 +97,7 @@ export interface TimelineEvent {
   elapsedMs: number;
   screenshot: string;
   bboxPath: string;
+  bboxOverflows: BBoxOverflow[];
   domPath: string;
   domSummary: Record<string, boolean | number | string | string[]>;
   consoleSummary: {
@@ -337,7 +338,7 @@ async function executeJourney(
   domSignals.bboxOverflowCount = bboxOverflows.length;
   const expectedSignals = Array.from(new Set([...profile.expectedSignals, ...journey.steps.flatMap((step) => step.expectedSignals ?? [])]));
   findings.push(...buildSignalFindings(profile, journey.id, viewportName, expectedSignals, domSignals, screenshots, reproBase));
-  findings.push(...buildBBoxOverflowFindings(profile, journey.id, viewportName, bboxOverflows, bboxSnapshots, screenshots, reproBase));
+  findings.push(...buildBBoxOverflowFindings(profile, journey.id, viewportName, bboxOverflows, bboxSnapshots, timelineEvents, screenshots, reproBase));
   findings.push(...buildRuntimeFindings(viewportName, journey.id, consoleErrors, networkFailures, screenshots, reproBase));
 
   return {
@@ -495,6 +496,7 @@ async function captureTimelineEvent(
     elapsedMs: eventElapsedMs(event),
     screenshot,
     bboxPath,
+    bboxOverflows,
     domPath,
     domSummary,
     consoleSummary: {
@@ -567,17 +569,32 @@ async function writeTimelineContactSheetIndex(timelineDir: string, events: Timel
 }
 
 function renderContactSheetHtml(title: string, events: TimelineEvent[], currentPath: string): string {
-  const cards = events.map((event) => {
+  const firstBadFrameIndex = events.findIndex((event) => event.bboxOverflows.length > 0);
+  const cards = events.map((event, index) => {
     const screenshot = relative(dirname(currentPath), event.screenshot);
     const bbox = relative(dirname(currentPath), event.bboxPath);
     const dom = relative(dirname(currentPath), event.domPath);
     const statusTexts = Array.isArray(event.domSummary.statusTexts) ? event.domSummary.statusTexts.slice(0, 3).join(" | ") : "";
+    const imageSummaries = Array.isArray(event.domSummary.imageSummaries) ? event.domSummary.imageSummaries.slice(0, 3).join(" | ") : "";
+    const attachmentSummaries = Array.isArray(event.domSummary.attachmentSummaries) ? event.domSummary.attachmentSummaries.slice(0, 3).join(" | ") : "";
+    const scrollSummary = typeof event.domSummary.scrollWidth === "number" && typeof event.domSummary.clientWidth === "number"
+      ? `${event.domSummary.scrollWidth}/${event.domSummary.clientWidth}`
+      : "";
+    const overflowSummary = event.bboxOverflows.slice(0, 3)
+      .map((overflow) => `${overflow.selector} left=${overflow.overflowLeft} right=${overflow.overflowRight}`)
+      .join(" | ");
+    const firstBadFrame = index === firstBadFrameIndex;
     return `      <article class="frame">
+        ${firstBadFrame ? `<div class="badge">FIRST BAD FRAME</div>` : ""}
         <a href="${escapeHtml(screenshot)}"><img src="${escapeHtml(screenshot)}" alt="${escapeHtml(event.event)} screenshot"></a>
-        <h2>${escapeHtml(event.event)}</h2>
+        <h2>${escapeHtml(event.event)}${event.elapsedMs ? ` ${event.elapsedMs}ms` : ""}</h2>
         <p>${escapeHtml(event.timestamp)}${event.elapsedMs ? ` &middot; ${event.elapsedMs}ms` : ""}</p>
         <p>Console: ${event.consoleSummary.count} &middot; Network: ${event.networkSummary.count}</p>
         ${statusTexts ? `<p>Status: ${escapeHtml(statusTexts)}</p>` : ""}
+        <p>Images: ${event.domSummary.visibleImages ?? 0}${imageSummaries ? ` (${escapeHtml(imageSummaries)})` : ""}</p>
+        ${attachmentSummaries ? `<p>Attachments: ${escapeHtml(attachmentSummaries)}</p>` : ""}
+        ${scrollSummary ? `<p>Scroll/client width: ${escapeHtml(scrollSummary)}</p>` : ""}
+        ${overflowSummary ? `<p>Overflow: ${escapeHtml(overflowSummary)}</p>` : ""}
         <p><a href="${escapeHtml(bbox)}">bbox</a> &middot; <a href="${escapeHtml(dom)}">dom</a></p>
       </article>`;
   }).join("\n");
@@ -591,6 +608,7 @@ function renderContactSheetHtml(title: string, events: TimelineEvent[], currentP
     h1 { margin: 0 0 16px; font-size: 22px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
     .frame { background: white; border: 1px solid #d8dee4; border-radius: 8px; padding: 12px; }
+    .badge { display: inline-block; margin: 0 0 8px; padding: 4px 8px; border-radius: 999px; background: #b42318; color: white; font-weight: 700; font-size: 12px; }
     img { display: block; width: 100%; max-height: 420px; object-fit: contain; background: #eef1f4; border: 1px solid #d8dee4; border-radius: 6px; }
     h2 { margin: 10px 0 4px; font-size: 15px; }
     p { margin: 4px 0; color: #46515c; overflow-wrap: anywhere; }
@@ -690,17 +708,31 @@ async function collectTimelineDomSummary(page: Page, profile: AuditProfile): Pro
       .map((element) => (element.textContent ?? "").trim().replace(/\s+/g, " "))
       .filter(Boolean)
       .slice(0, 10);
-    const visibleImages = Array.from(document.querySelectorAll("img"))
+    const visibleImageElements = Array.from(document.querySelectorAll("img"))
       .filter((element) => {
         const rect = element.getBoundingClientRect();
         const style = window.getComputedStyle(element);
         return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-      }).length;
+      });
+    const imageSummaries = visibleImageElements.map((element, index) => {
+      const rect = element.getBoundingClientRect();
+      return `img[${index}] ${Math.round(rect.width)}x${Math.round(rect.height)} natural=${element.naturalWidth}x${element.naturalHeight} alt="${(element.alt ?? "").slice(0, 40)}"`;
+    }).slice(0, 10);
+    const attachmentSummaries = Array.from(document.querySelectorAll("[data-attachment], [data-testid*='attachment' i], [class*='attachment' i], [class*='upload' i], [class*='image' i], [aria-label*='attachment' i], [aria-label*='upload' i], [aria-label*='image' i]"))
+      .map((element, index) => {
+        const rect = element.getBoundingClientRect();
+        const text = (element.textContent ?? element.getAttribute("aria-label") ?? "").trim().replace(/\s+/g, " ").slice(0, 80);
+        return `attachment[${index}] ${element.tagName.toLowerCase()} ${Math.round(rect.width)}x${Math.round(rect.height)} "${text}"`;
+      })
+      .filter(Boolean)
+      .slice(0, 10);
     const rawLatexMatches = (document.body.innerText.match(/\\(?:frac|sqrt|begin|end)|\$\$/g) ?? []).length;
     return {
       url: window.location.href,
       statusTexts,
-      visibleImages,
+      visibleImages: visibleImageElements.length,
+      imageSummaries,
+      attachmentSummaries,
       rawLatexMatches,
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth
@@ -976,11 +1008,13 @@ function buildBBoxOverflowFindings(
   viewport: ViewportName,
   overflows: BBoxOverflow[],
   snapshots: BBoxSnapshot[],
+  timelineEvents: TimelineEvent[],
   screenshots: string[],
   reproBase: string[]
 ): Finding[] {
   return overflows.map((overflow) => {
     const introducedAt = findIntroducedAtStep(overflow, snapshots);
+    const introducedAtEvent = findIntroducedAtEvent(overflow, timelineEvents);
     const classification = classifyBBoxOverflow(overflow, profile.criticalControls);
     const label = overflow.ariaLabel ?? overflow.text ?? overflow.role ?? overflow.selector;
     const overflowText = overflow.overflowLeft > 0
@@ -994,6 +1028,22 @@ function buildBBoxOverflowFindings(
       journey: journeyId,
       viewport,
       introducedAtStep: introducedAt ? { index: introducedAt.stepIndex, label: introducedAt.stepLabel, action: introducedAt.action } : undefined,
+      introducedAtEvent: introducedAtEvent ? {
+        viewport: introducedAtEvent.viewport,
+        journey: introducedAtEvent.journey,
+        stepIndex: introducedAtEvent.stepIndex,
+        stepLabel: introducedAtEvent.stepLabel,
+        action: introducedAtEvent.action,
+        event: introducedAtEvent.event,
+        timestamp: introducedAtEvent.timestamp,
+        elapsedMs: introducedAtEvent.elapsedMs,
+        screenshot: introducedAtEvent.screenshot,
+        bboxPath: introducedAtEvent.bboxPath,
+        domPath: introducedAtEvent.domPath,
+        domSummary: introducedAtEvent.domSummary,
+        consoleSummary: introducedAtEvent.consoleSummary,
+        networkSummary: introducedAtEvent.networkSummary
+      } : undefined,
       confidence: classification.critical ? "high" : "medium",
       tags: ["bbox", "overflow", "layout", viewport, classification.critical ? "critical-control" : "review", ...(classification.controlName ? [`control:${classification.controlName}`] : [])],
       userSymptom: classification.critical
@@ -1004,10 +1054,15 @@ function buildBBoxOverflowFindings(
         : "Non-critical visible elements should either stay inside the viewport or be explicitly marked as intentional off-canvas UI.",
       actual: `${overflowText}. Selector: ${overflow.selector}. BBox: ${JSON.stringify(overflow.bbox)}.`,
       evidence: [
-        { type: "bbox", path: introducedAt?.artifactPath, detail: `selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}; introducedAtStep=${introducedAt ? `${introducedAt.stepIndex} ${introducedAt.stepLabel}` : "unknown"}` },
+        ...(introducedAtEvent ? [
+          { type: "screenshot" as const, path: introducedAtEvent.screenshot, detail: `Timeline screenshot captured at event ${introducedAtEvent.event}` },
+          { type: "bbox" as const, path: introducedAtEvent.bboxPath, detail: `Timeline bbox captured at event ${introducedAtEvent.event}; selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}; overflowLeft=${overflow.overflowLeft}; overflowRight=${overflow.overflowRight}` },
+          { type: "dom" as const, path: introducedAtEvent.domPath, detail: `Timeline DOM/status summary captured at event ${introducedAtEvent.event}` }
+        ] : []),
+        { type: "bbox", path: introducedAt?.artifactPath, detail: `selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}; overflowLeft=${overflow.overflowLeft}; overflowRight=${overflow.overflowRight}; introducedAtStep=${introducedAt ? `${introducedAt.stepIndex} ${introducedAt.stepLabel}` : "unknown"}` },
         { type: "screenshot", path: introducedAt?.screenshot ?? screenshots.at(-1), detail: introducedAt ? "Screenshot captured at the first step where overflow was observed" : "Latest screenshot after the audited journey" }
       ],
-      reproSteps: [...reproBase, ...(introducedAt ? [`Run step ${introducedAt.stepIndex}: ${introducedAt.stepLabel} (${introducedAt.action})`] : []), `Inspect ${overflow.selector} bounding box`],
+      reproSteps: [...reproBase, ...(introducedAt ? [`Run step ${introducedAt.stepIndex}: ${introducedAt.stepLabel} (${introducedAt.action})`] : []), ...(introducedAtEvent ? [`Inspect timeline event ${introducedAtEvent.event}`] : []), `Inspect ${overflow.selector} bounding box`],
       acceptanceCriteria: [
         classification.critical
           ? "The critical control has x >= 0 and x + width <= viewport width on mobile and small-mobile."
@@ -1044,6 +1099,10 @@ function matchesAny(value: string | undefined, needles: string[] | undefined): b
 
 export function findIntroducedAtStep(overflow: BBoxOverflow, snapshots: BBoxSnapshot[]): BBoxSnapshot | undefined {
   return snapshots.find((snapshot) => snapshot.overflows.some((candidate) => sameOverflowTarget(candidate, overflow)));
+}
+
+export function findIntroducedAtEvent(overflow: BBoxOverflow, timelineEvents: TimelineEvent[]): TimelineEvent | undefined {
+  return timelineEvents.find((event) => event.bboxOverflows.some((candidate) => sameOverflowTarget(candidate, overflow)));
 }
 
 function sameOverflowTarget(left: BBoxOverflow, right: BBoxOverflow): boolean {

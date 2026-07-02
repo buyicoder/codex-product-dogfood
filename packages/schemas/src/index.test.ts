@@ -19,6 +19,27 @@ describe("schemas", () => {
     expect(() => assertFindingShape(validFinding)).not.toThrow();
   });
 
+  it("allows optional introducedAtEvent metadata", () => {
+    expect(() => assertFindingShape({
+      ...validFinding,
+      introducedAtEvent: {
+        viewport: "mobile",
+        journey: "homework-help",
+        stepIndex: 2,
+        stepLabel: "Upload homework",
+        action: "upload",
+        event: "uploading-500ms",
+        elapsedMs: 500,
+        screenshot: "/tmp/timeline/uploading-500ms.png",
+        bboxPath: "/tmp/timeline/uploading-500ms-bbox.json",
+        domPath: "/tmp/timeline/uploading-500ms-dom.json",
+        domSummary: { visibleImages: 1, statusTexts: ["Uploading"] },
+        consoleSummary: { count: 0, latest: [] },
+        networkSummary: { count: 0, latest: [] }
+      }
+    })).not.toThrow();
+  });
+
   it("rejects missing required finding fields", () => {
     expect(() => assertFindingShape({ ...validFinding, actual: undefined as unknown as string })).toThrow("missing actual");
   });
