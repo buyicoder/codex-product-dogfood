@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { getProfile, loadProfileFile, type AuditJourney, type AuditProfile, type CriticalControlRule, type JourneyStep, type TargetConfig } from "@codex-product-dogfood/profiles";
@@ -28,6 +28,7 @@ interface StepResult {
   screenshot?: string;
   bboxSnapshot?: string;
   timelineManifest?: string;
+  timelineContactSheet?: string;
   detail?: string;
 }
 
@@ -115,6 +116,7 @@ export interface TimelineStepManifest {
   stepLabel: string;
   action: string;
   events: TimelineEvent[];
+  contactSheet?: string;
 }
 
 const execFileAsync = promisify(execFile);
@@ -192,6 +194,7 @@ export async function runAudit(options: AuditOptions): Promise<AuditReport> {
   await writeFile(join(outDir, "run.json"), `${JSON.stringify(run, null, 2)}\n`);
   await writeFile(join(outDir, "timeline.json"), `${JSON.stringify({ events: timelineEvents }, null, 2)}\n`);
   await writeFile(join(timelineDir, "manifest.json"), `${JSON.stringify({ events: timelineEvents }, null, 2)}\n`);
+  await writeTimelineContactSheetIndex(timelineDir, timelineEvents);
   await writeReport(outDir, report);
   return report;
 }
@@ -311,7 +314,8 @@ async function executeJourney(
     const result = await executeStep(page, profile, step, url, outDir, timeoutMs);
     stepTimelineEvents.push(...await capturePostStepTimeline(page, profile, step, timelineDir, viewportName, journey.id, index, consoleErrors, networkFailures));
     timelineEvents.push(...stepTimelineEvents);
-    const timelineManifest = await writeTimelineStepManifest(timelineDir, viewportName, journey.id, index, step, stepTimelineEvents);
+    const timelineContactSheet = await writeTimelineStepContactSheet(timelineDir, viewportName, journey.id, index, step, stepTimelineEvents);
+    const timelineManifest = await writeTimelineStepManifest(timelineDir, viewportName, journey.id, index, step, stepTimelineEvents, timelineContactSheet);
     if (step.action === "open" && result.status === "passed") {
       opened = true;
     }
@@ -319,7 +323,7 @@ async function executeJourney(
     screenshots.push(screenshot);
     const bboxSnapshot = await captureBBoxSnapshot(page, domDir, viewportName, journey.id, index, step, screenshot);
     bboxSnapshots.push(bboxSnapshot);
-    steps.push({ journey: journey.id, step: step.label, action: step.action, status: result.status, screenshot, bboxSnapshot: bboxSnapshot.artifactPath, timelineManifest, detail: result.detail });
+    steps.push({ journey: journey.id, step: step.label, action: step.action, status: result.status, screenshot, bboxSnapshot: bboxSnapshot.artifactPath, timelineManifest, timelineContactSheet, detail: result.detail });
     if (result.status === "failed") {
       findings.push(stepFailureFinding(profile, journey, step, viewportName, result.detail, screenshot, reproBase));
     }
@@ -510,7 +514,8 @@ export async function writeTimelineStepManifest(
   journey: string,
   index: number,
   step: JourneyStep,
-  events: TimelineEvent[]
+  events: TimelineEvent[],
+  contactSheet?: string
 ): Promise<string> {
   const directory = join(timelineDir, viewportName, journey, `${String(index + 1).padStart(2, "0")}-${slug(step.action)}`);
   await mkdir(directory, { recursive: true });
@@ -521,10 +526,134 @@ export async function writeTimelineStepManifest(
     stepIndex: index + 1,
     stepLabel: step.label,
     action: step.action,
-    events
+    events,
+    contactSheet
   };
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return manifestPath;
+}
+
+export async function writeTimelineStepContactSheet(
+  timelineDir: string,
+  viewportName: ViewportName,
+  journey: string,
+  index: number,
+  step: JourneyStep,
+  events: TimelineEvent[]
+): Promise<string> {
+  const directory = join(timelineDir, viewportName, journey, `${String(index + 1).padStart(2, "0")}-${slug(step.action)}`);
+  await mkdir(directory, { recursive: true });
+  const contactSheetPath = join(directory, "contact-sheet.html");
+  const title = `${viewportName} / ${journey} / ${index + 1}. ${step.label}`;
+  await writeFile(contactSheetPath, renderContactSheetHtml(title, events, contactSheetPath));
+  return contactSheetPath;
+}
+
+async function writeTimelineContactSheetIndex(timelineDir: string, events: TimelineEvent[]): Promise<string> {
+  const grouped = new Map<string, TimelineEvent[]>();
+  for (const event of events) {
+    const key = `${event.viewport}/${event.journey}/${String(event.stepIndex).padStart(2, "0")}-${slug(event.action)}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), event]);
+  }
+  const sections = Array.from(grouped.entries()).map(([key, stepEvents]) => {
+    const first = stepEvents[0];
+    const title = first ? `${first.viewport} / ${first.journey} / ${first.stepIndex}. ${first.stepLabel}` : key;
+    const contactSheet = first ? join(timelineDir, first.viewport, first.journey, `${String(first.stepIndex).padStart(2, "0")}-${slug(first.action)}`, "contact-sheet.html") : undefined;
+    return { key, title, events: stepEvents, contactSheet };
+  });
+  const indexPath = join(timelineDir, "contact-sheet.html");
+  await writeFile(indexPath, renderContactSheetIndexHtml("Timeline Contact Sheets", sections, indexPath));
+  return indexPath;
+}
+
+function renderContactSheetHtml(title: string, events: TimelineEvent[], currentPath: string): string {
+  const cards = events.map((event) => {
+    const screenshot = relative(dirname(currentPath), event.screenshot);
+    const bbox = relative(dirname(currentPath), event.bboxPath);
+    const dom = relative(dirname(currentPath), event.domPath);
+    const statusTexts = Array.isArray(event.domSummary.statusTexts) ? event.domSummary.statusTexts.slice(0, 3).join(" | ") : "";
+    return `      <article class="frame">
+        <a href="${escapeHtml(screenshot)}"><img src="${escapeHtml(screenshot)}" alt="${escapeHtml(event.event)} screenshot"></a>
+        <h2>${escapeHtml(event.event)}</h2>
+        <p>${escapeHtml(event.timestamp)}${event.elapsedMs ? ` &middot; ${event.elapsedMs}ms` : ""}</p>
+        <p>Console: ${event.consoleSummary.count} &middot; Network: ${event.networkSummary.count}</p>
+        ${statusTexts ? `<p>Status: ${escapeHtml(statusTexts)}</p>` : ""}
+        <p><a href="${escapeHtml(bbox)}">bbox</a> &middot; <a href="${escapeHtml(dom)}">dom</a></p>
+      </article>`;
+  }).join("\n");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { margin: 24px; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17202a; background: #f7f8fa; }
+    h1 { margin: 0 0 16px; font-size: 22px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
+    .frame { background: white; border: 1px solid #d8dee4; border-radius: 8px; padding: 12px; }
+    img { display: block; width: 100%; max-height: 420px; object-fit: contain; background: #eef1f4; border: 1px solid #d8dee4; border-radius: 6px; }
+    h2 { margin: 10px 0 4px; font-size: 15px; }
+    p { margin: 4px 0; color: #46515c; overflow-wrap: anywhere; }
+    a { color: #0969da; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(title)}</h1>
+  <main class="grid">
+${cards}
+  </main>
+</body>
+</html>
+`;
+}
+
+function renderContactSheetIndexHtml(
+  title: string,
+  sections: Array<{ key: string; title: string; events: TimelineEvent[]; contactSheet?: string }>,
+  currentPath: string
+): string {
+  const items = sections.map((section) => {
+    const contactSheet = section.contactSheet ? relative(dirname(currentPath), section.contactSheet) : undefined;
+    const preview = section.events[0] ? relative(dirname(currentPath), section.events[0].screenshot) : undefined;
+    return `      <article class="step">
+        ${preview ? `<a href="${escapeHtml(contactSheet ?? preview)}"><img src="${escapeHtml(preview)}" alt="${escapeHtml(section.title)} preview"></a>` : ""}
+        <h2>${contactSheet ? `<a href="${escapeHtml(contactSheet)}">${escapeHtml(section.title)}</a>` : escapeHtml(section.title)}</h2>
+        <p>${section.events.length} timeline events</p>
+        <p>${escapeHtml(section.events.map((event) => event.event).join(" -> "))}</p>
+      </article>`;
+  }).join("\n");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { margin: 24px; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17202a; background: #f7f8fa; }
+    h1 { margin: 0 0 16px; font-size: 22px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+    .step { background: white; border: 1px solid #d8dee4; border-radius: 8px; padding: 12px; }
+    img { display: block; width: 100%; max-height: 220px; object-fit: contain; background: #eef1f4; border: 1px solid #d8dee4; border-radius: 6px; }
+    h2 { margin: 10px 0 4px; font-size: 15px; }
+    p { margin: 4px 0; color: #46515c; overflow-wrap: anywhere; }
+    a { color: #0969da; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(title)}</h1>
+  <main class="grid">
+${items}
+  </main>
+</body>
+</html>
+`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 export function timelineEventNamesForStep(step: Pick<JourneyStep, "action">): string[] {

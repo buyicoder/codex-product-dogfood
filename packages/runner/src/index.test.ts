@@ -2,7 +2,7 @@ import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { classifyBBoxOverflow, detectBBoxOverflows, findIntroducedAtStep, timelineEventNamesForStep, writeTimelineStepManifest, type BBoxElement, type BBoxOverflow, type BBoxSnapshot, type TimelineEvent } from "./index.js";
+import { classifyBBoxOverflow, detectBBoxOverflows, findIntroducedAtStep, timelineEventNamesForStep, writeTimelineStepContactSheet, writeTimelineStepManifest, type BBoxElement, type BBoxOverflow, type BBoxSnapshot, type TimelineEvent } from "./index.js";
 
 describe("bbox overflow detection", () => {
   it("detects visible elements that cross viewport edges", () => {
@@ -135,7 +135,7 @@ describe("bbox overflow detection", () => {
     ]);
   });
 
-  it("writes per-step timeline manifests with screenshot, bbox, and dom artifacts", async () => {
+  it("writes per-step timeline manifests and contact sheets with screenshot, bbox, and dom artifacts", async () => {
     const timelineDir = await mkdtemp(join(tmpdir(), "dogfood-timeline-"));
     const event: TimelineEvent = {
       viewport: "mobile",
@@ -158,7 +158,7 @@ describe("bbox overflow detection", () => {
       networkSummary: { count: 0, latest: [] }
     };
 
-    const manifestPath = await writeTimelineStepManifest(
+    const contactSheetPath = await writeTimelineStepContactSheet(
       timelineDir,
       "mobile",
       "homework-help",
@@ -166,14 +166,30 @@ describe("bbox overflow detection", () => {
       { action: "upload", label: "Try attaching homework evidence" },
       [event]
     );
+    const manifestPath = await writeTimelineStepManifest(
+      timelineDir,
+      "mobile",
+      "homework-help",
+      1,
+      { action: "upload", label: "Try attaching homework evidence" },
+      [event],
+      contactSheetPath
+    );
     await expect(stat(manifestPath)).resolves.toMatchObject({ isFile: expect.any(Function) });
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { events: TimelineEvent[] };
+    await expect(stat(contactSheetPath)).resolves.toMatchObject({ isFile: expect.any(Function) });
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { events: TimelineEvent[]; contactSheet: string };
+    const contactSheet = await readFile(contactSheetPath, "utf8");
 
+    expect(manifest.contactSheet).toBe(contactSheetPath);
     expect(manifest.events[0]).toMatchObject({
       event: "uploading-500ms",
       screenshot: event.screenshot,
       bboxPath: event.bboxPath,
       domPath: event.domPath
     });
+    expect(contactSheet).toContain("uploading-500ms");
+    expect(contactSheet).toContain("004-uploading-500ms.png");
+    expect(contactSheet).toContain("004-uploading-500ms-bbox.json");
+    expect(contactSheet).toContain("004-uploading-500ms-dom.json");
   });
 });
