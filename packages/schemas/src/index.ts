@@ -1,20 +1,54 @@
 export type Severity = "P0" | "P1" | "P2";
 
+export type Confidence = "high" | "medium" | "low";
+
 export type ViewportName = "desktop" | "mobile" | "small-mobile";
 
 export type ProfileName = "ai-chat" | "student-learning";
 
 export interface Evidence {
-  type: "screenshot" | "console" | "network" | "dom" | "trace";
+  type: "screenshot" | "console" | "network" | "dom" | "trace" | "bbox";
   path?: string;
   detail: string;
 }
 
 export interface Finding {
+  id?: string;
   severity: Severity;
+  confidence?: Confidence;
   title: string;
   journey: string;
   viewport: ViewportName;
+  introducedAtStep?: {
+    index: number;
+    label: string;
+    action: string;
+  };
+  introducedAtEvent?: {
+    viewport?: ViewportName;
+    journey?: string;
+    stepIndex?: number;
+    stepLabel?: string;
+    action?: string;
+    event: string;
+    timestamp?: string;
+    elapsedMs?: number;
+    screenshot?: string;
+    bboxPath?: string;
+    domPath?: string;
+    stateChainPath?: string;
+    domSummary?: Record<string, boolean | number | string | string[]>;
+    consoleSummary?: {
+      count: number;
+      latest: string[];
+    };
+    networkSummary?: {
+      count: number;
+      latest: string[];
+    };
+  };
+  affectedViewports?: ViewportName[];
+  tags?: string[];
   userSymptom: string;
   expected: string;
   actual: string;
@@ -31,7 +65,7 @@ export interface MaturityScore {
 
 export interface AuditSummary {
   url: string;
-  profile: ProfileName;
+  profile: string;
   generatedAt: string;
   viewports: ViewportName[];
   maturity: MaturityScore;
@@ -53,6 +87,7 @@ export interface DevelopmentPlanItem {
 
 export interface RuntimeSignal {
   viewport: ViewportName;
+  journey?: string;
   consoleErrors: string[];
   networkFailures: string[];
   domSignals: Record<string, boolean | number | string | string[]>;

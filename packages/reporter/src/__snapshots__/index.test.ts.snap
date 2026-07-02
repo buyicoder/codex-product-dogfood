@@ -1,0 +1,73 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`reporter > renders a markdown report with summary and findings 1`] = `
+"# Product Dogfood Report
+
+## Executive Summary
+
+- URL: https://example.com
+- Profile: ai-chat
+- Generated: 2026-07-01T00:00:00.000Z
+- Viewports: desktop
+- Maturity score: 85/100
+- Release readiness: strong
+- Finding counts: P0 0, P1 1, P2 0
+- Top risk: Core journey risk needs product review.
+
+## Maturity Rationale
+
+- 0 P0, 1 P1, 0 P2 findings
+- No critical blocker was detected by the MVP heuristics.
+
+## Findings By Priority
+
+### P1
+
+#### 1. Input missing
+
+- Journey: first-run
+- Viewport: desktop
+- Introduced at event: uploading-500ms (500ms) in step 2. Try attaching homework evidence
+- Introduced screenshot: timeline/mobile/homework-help/02-upload/004-uploading-500ms.png
+- Introduced bbox: timeline/mobile/homework-help/02-upload/004-uploading-500ms-bbox.json
+- Introduced DOM: timeline/mobile/homework-help/02-upload/004-uploading-500ms-dom.json
+- State chain: timeline/mobile/homework-help/02-upload/state-chain.json
+- Introduced DOM summary: status="Uploading image"; visibleImages=1; images=img[0] 80x60 natural=800x600 alt="homework"; rawLatexMatches=0; scroll/client=440/390
+- Console near event: 0
+- Network near event: 0
+- User symptom: User sees a problem.
+- Expected: The flow works.
+- Actual: The flow is broken.
+- Evidence:
+  - screenshot: Final screenshot (screenshots/desktop.png)
+- Repro steps:
+  - Open page
+- Acceptance criteria:
+  - Flow works
+
+## Recommended Development Plan
+
+### Next
+
+1. [P1] Input missing
+   - Why: User sees a problem. Actual behavior: The flow is broken.
+   - Acceptance: Flow works
+
+## Manual Review Checklist
+
+- Review every screenshot linked from P0/P1 findings.
+- Review \`timeline/contact-sheet.html\`, \`timeline.json\`, and per-step timeline manifests for upload, send, streaming formula, Markdown table, and composer/status state sequences.
+- Mark heuristic-only missing-signal findings as confirmed or false positive.
+- Check mobile and small-mobile screenshots for blocked primary actions.
+- Check bbox/overflow findings for composer, upload, voice, send, and status elements shifted outside the viewport.
+- Convert confirmed P0/P1 findings into implementation tasks before release.
+
+## Evidence Inventory
+
+- Timeline contact sheet: \`timeline/contact-sheet.html\`
+- Timeline manifest: \`timeline.json\`
+- Per-step timeline manifests: \`timeline/<viewport>/<journey>/<step>/manifest.json\`
+- screenshots/desktop.png
+
+"
+`;
