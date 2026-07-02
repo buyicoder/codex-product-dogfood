@@ -73,6 +73,9 @@ export function renderMarkdownReport(outDir: string, report: AuditReport): strin
         lines.push("");
         lines.push(`- Journey: ${finding.journey}`);
         lines.push(`- Viewport: ${finding.viewport}`);
+        if (finding.introducedAtStep) {
+          lines.push(`- Introduced at step: ${finding.introducedAtStep.index}. ${finding.introducedAtStep.label} (${finding.introducedAtStep.action})`);
+        }
         if (finding.confidence) {
           lines.push(`- Confidence: ${finding.confidence}`);
         }

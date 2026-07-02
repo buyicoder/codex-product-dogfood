@@ -19,6 +19,11 @@ export interface Finding {
   title: string;
   journey: string;
   viewport: ViewportName;
+  introducedAtStep?: {
+    index: number;
+    label: string;
+    action: string;
+  };
   affectedViewports?: ViewportName[];
   tags?: string[];
   userSymptom: string;

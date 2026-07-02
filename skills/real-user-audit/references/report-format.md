@@ -10,5 +10,6 @@ The report should include:
 - Recommended development plan with acceptance criteria.
 - Manual review checklist for false positives and screenshot review.
 - Bbox/overflow findings for mobile composer, upload, voice, send, and status controls that leave the viewport.
+- `introducedAtStep` for bbox/overflow findings when per-step snapshots identify the first step where overflow appears.
 
 The JSON report should preserve the same finding fields for automation.

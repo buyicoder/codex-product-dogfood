@@ -47,6 +47,7 @@ The runner automatically audits:
 - Captures DOM signals, console errors, and network failures.
 - Captures bounding boxes for visible buttons, form controls, status regions, and aria-labeled controls.
 - Flags mobile composer/status regressions when visible controls have `x < 0` or `x + width > viewportWidth`.
+- Saves per-step bbox snapshots so overflow findings can point to the first audited step where the issue appears.
 - Writes `report.md`, `findings.json`, `signals.json`, `run.json`, viewport DOM summaries, and `screenshots/`.
 
 ## Review Artifacts
@@ -60,6 +61,7 @@ Open `runtime/audits/latest/report.md` first, then inspect:
 - `runtime/audits/latest/dom/`
 
 Mobile layout note: bbox/overflow findings are intended to catch composer, upload, voice, send, and status-copy regressions where controls are clipped or shifted offscreen at mobile widths such as `390x844` and `375x667`.
+When available, bbox findings include `introducedAtStep` and link to the step-level bbox artifact, such as `dom/mobile-first-prompt-03-fill-bbox.json`.
 
 Treat MVP findings as triage. Confirm screenshot evidence before making strong product claims.
 

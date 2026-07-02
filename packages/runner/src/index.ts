@@ -26,6 +26,7 @@ interface StepResult {
   action: string;
   status: "passed" | "failed" | "skipped";
   screenshot?: string;
+  bboxSnapshot?: string;
   detail?: string;
 }
 
@@ -64,6 +65,16 @@ export interface BBoxOverflow {
   viewportWidth: number;
   overflowLeft: number;
   overflowRight: number;
+}
+
+export interface BBoxSnapshot {
+  stepIndex: number;
+  stepLabel: string;
+  action: string;
+  screenshot?: string;
+  artifactPath?: string;
+  elements: BBoxElement[];
+  overflows: BBoxOverflow[];
 }
 
 const execFileAsync = promisify(execFile);
@@ -221,6 +232,7 @@ async function executeJourney(
   networkFailures: string[]
 ): Promise<{ findings: Finding[]; signal: RuntimeSignal; steps: StepResult[] }> {
   const screenshots: string[] = [];
+  const bboxSnapshots: BBoxSnapshot[] = [];
   const findings: Finding[] = [];
   const steps: StepResult[] = [];
   const reproBase = [
@@ -249,7 +261,9 @@ async function executeJourney(
     }
     const screenshot = await screenshotPage(page, screenshotsDir, viewportName, journey.id, index, step.action);
     screenshots.push(screenshot);
-    steps.push({ journey: journey.id, step: step.label, action: step.action, status: result.status, screenshot, detail: result.detail });
+    const bboxSnapshot = await captureBBoxSnapshot(page, domDir, viewportName, journey.id, index, step, screenshot);
+    bboxSnapshots.push(bboxSnapshot);
+    steps.push({ journey: journey.id, step: step.label, action: step.action, status: result.status, screenshot, bboxSnapshot: bboxSnapshot.artifactPath, detail: result.detail });
     if (result.status === "failed") {
       findings.push(stepFailureFinding(profile, journey, step, viewportName, result.detail, screenshot, reproBase));
     }
@@ -259,11 +273,11 @@ async function executeJourney(
   const bboxElements = await collectBBoxElements(page);
   const bboxOverflows = detectBBoxOverflows(bboxElements, viewports[viewportName].width);
   await writeFile(join(domDir, `${viewportName}-${journey.id}.json`), `${JSON.stringify(domSignals, null, 2)}\n`);
-  await writeFile(join(domDir, `${viewportName}-${journey.id}-bbox.json`), `${JSON.stringify({ viewportWidth: viewports[viewportName].width, elements: bboxElements, overflows: bboxOverflows }, null, 2)}\n`);
+  await writeFile(join(domDir, `${viewportName}-${journey.id}-bbox.json`), `${JSON.stringify({ viewportWidth: viewports[viewportName].width, elements: bboxElements, overflows: bboxOverflows, stepSnapshots: bboxSnapshots }, null, 2)}\n`);
   domSignals.bboxOverflowCount = bboxOverflows.length;
   const expectedSignals = Array.from(new Set([...profile.expectedSignals, ...journey.steps.flatMap((step) => step.expectedSignals ?? [])]));
   findings.push(...buildSignalFindings(profile, journey.id, viewportName, expectedSignals, domSignals, screenshots, reproBase));
-  findings.push(...buildBBoxOverflowFindings(journey.id, viewportName, bboxOverflows, screenshots, reproBase));
+  findings.push(...buildBBoxOverflowFindings(journey.id, viewportName, bboxOverflows, bboxSnapshots, screenshots, reproBase));
   findings.push(...buildRuntimeFindings(viewportName, journey.id, consoleErrors, networkFailures, screenshots, reproBase));
 
   return {
@@ -339,6 +353,31 @@ async function screenshotPage(page: Page, screenshotsDir: string, viewportName: 
   const path = join(directory, `${String(index + 1).padStart(2, "0")}-${slug(action)}.png`);
   await page.screenshot({ path, fullPage: true });
   return path;
+}
+
+async function captureBBoxSnapshot(
+  page: Page,
+  domDir: string,
+  viewportName: ViewportName,
+  journey: string,
+  index: number,
+  step: JourneyStep,
+  screenshot: string
+): Promise<BBoxSnapshot> {
+  const elements = await collectBBoxElements(page);
+  const overflows = detectBBoxOverflows(elements, viewports[viewportName].width);
+  const artifactPath = join(domDir, `${viewportName}-${journey}-${String(index + 1).padStart(2, "0")}-${slug(step.action)}-bbox.json`);
+  const snapshot: BBoxSnapshot = {
+    stepIndex: index + 1,
+    stepLabel: step.label,
+    action: step.action,
+    screenshot,
+    artifactPath,
+    elements,
+    overflows
+  };
+  await writeFile(artifactPath, `${JSON.stringify({ viewportWidth: viewports[viewportName].width, ...snapshot }, null, 2)}\n`);
+  return snapshot;
 }
 
 async function clickTarget(page: Page, target: TargetConfig | undefined, fallbackKeywords: string[]): Promise<boolean> {
@@ -577,10 +616,12 @@ function buildBBoxOverflowFindings(
   journeyId: string,
   viewport: ViewportName,
   overflows: BBoxOverflow[],
+  snapshots: BBoxSnapshot[],
   screenshots: string[],
   reproBase: string[]
 ): Finding[] {
   return overflows.map((overflow) => {
+    const introducedAt = findIntroducedAtStep(overflow, snapshots);
     const label = overflow.ariaLabel ?? overflow.text ?? overflow.role ?? overflow.selector;
     const overflowText = overflow.overflowLeft > 0
       ? `x is ${overflow.bbox.x}, ${overflow.overflowLeft}px beyond the left viewport edge`
@@ -590,16 +631,17 @@ function buildBBoxOverflowFindings(
       title: `Interactive element overflows viewport: ${label}`,
       journey: journeyId,
       viewport,
+      introducedAtStep: introducedAt ? { index: introducedAt.stepIndex, label: introducedAt.stepLabel, action: introducedAt.action } : undefined,
       confidence: "high",
       tags: ["bbox", "overflow", "layout", viewport],
       userSymptom: "A mobile user may see composer/status controls clipped, shifted offscreen, or hard to tap.",
       expected: "Visible interactive and status elements should stay fully inside the viewport.",
       actual: `${overflowText}. Selector: ${overflow.selector}. BBox: ${JSON.stringify(overflow.bbox)}.`,
       evidence: [
-        { type: "bbox", detail: `selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}` },
-        { type: "screenshot", path: screenshots.at(-1), detail: "Screenshot captured after the audited journey step" }
+        { type: "bbox", path: introducedAt?.artifactPath, detail: `selector=${overflow.selector}; role=${overflow.role ?? "n/a"}; text=${overflow.text ?? overflow.ariaLabel ?? "n/a"}; bbox=${JSON.stringify(overflow.bbox)}; viewportWidth=${overflow.viewportWidth}; introducedAtStep=${introducedAt ? `${introducedAt.stepIndex} ${introducedAt.stepLabel}` : "unknown"}` },
+        { type: "screenshot", path: introducedAt?.screenshot ?? screenshots.at(-1), detail: introducedAt ? "Screenshot captured at the first step where overflow was observed" : "Latest screenshot after the audited journey" }
       ],
-      reproSteps: [...reproBase, `Inspect ${overflow.selector} bounding box`],
+      reproSteps: [...reproBase, ...(introducedAt ? [`Run step ${introducedAt.stepIndex}: ${introducedAt.stepLabel} (${introducedAt.action})`] : []), `Inspect ${overflow.selector} bounding box`],
       acceptanceCriteria: [
         "The element has x >= 0 and x + width <= viewport width on mobile and small-mobile.",
         "Status, upload, voice, and send controls do not push each other outside the viewport.",
@@ -607,6 +649,17 @@ function buildBBoxOverflowFindings(
       ]
     };
   });
+}
+
+export function findIntroducedAtStep(overflow: BBoxOverflow, snapshots: BBoxSnapshot[]): BBoxSnapshot | undefined {
+  return snapshots.find((snapshot) => snapshot.overflows.some((candidate) => sameOverflowTarget(candidate, overflow)));
+}
+
+function sameOverflowTarget(left: BBoxOverflow, right: BBoxOverflow): boolean {
+  return left.selector === right.selector
+    && left.role === right.role
+    && left.text === right.text
+    && left.ariaLabel === right.ariaLabel;
 }
 
 function buildRuntimeFindings(
